@@ -1,4 +1,37 @@
-from .user import User, UserCreate, UserUpdate, UserInDB, UserResponse, UserProfile
-from .auth import Token, TokenData, LoginRequest, PasswordResetRequest, PasswordResetConfirm, PasswordChange
-from .image import ImageCreate, ImageResponse, ImageUpdate
-from .user_calories import UserCaloriesCreate, UserCaloriesUpdate, UserCaloriesResponse, UserCaloriesSummary
+from app.schemas.admin import (
+    AdminRoleUpdate,
+    AdminStatsResponse,
+    AdminUserImagesListResponse,
+    AdminUserListResponse,
+    AdminUserProfilePatch,
+)
+from app.schemas.image import ImageCreate, ImageResponse, ImageUpdate
+from app.schemas.user import UserResponse, UserStreakResponse, UserUpdate
+from app.schemas.user_calories import (
+    ActivityCalories,
+    ActivityLogRequest,
+    UserCaloriesCreate,
+    UserCaloriesResponse,
+    UserCaloriesSummary,
+    UserCaloriesUpdate,
+)
+
+__all__ = (
+    "ActivityCalories",
+    "ActivityLogRequest",
+    "AdminRoleUpdate",
+    "AdminStatsResponse",
+    "AdminUserImagesListResponse",
+    "AdminUserListResponse",
+    "AdminUserProfilePatch",
+    "ImageCreate",
+    "ImageResponse",
+    "ImageUpdate",
+    "UserCaloriesCreate",
+    "UserCaloriesResponse",
+    "UserCaloriesSummary",
+    "UserCaloriesUpdate",
+    "UserResponse",
+    "UserStreakResponse",
+    "UserUpdate",
+)

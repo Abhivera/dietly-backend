@@ -2,7 +2,8 @@ import time
 import logging
 from typing import Dict, Tuple
 from fastapi import HTTPException, Request
-from datetime import datetime, timedelta
+
+from app.core.client_ip import get_client_ip
 import threading
 
 logger = logging.getLogger(__name__)
@@ -70,20 +71,24 @@ def check_daily_rate_limit(request: Request, max_requests: int = 5):
     """
     Dependency function to check daily rate limit for an IP
     """
-    # Get client IP
-    client_ip = request.client.host
-    
+    client_ip = get_client_ip(request)
+
     # Check rate limit
     allowed, remaining = rate_limiter.check_rate_limit(client_ip, max_requests)
-    
+
     if not allowed:
+        logger.warning(
+            "rate_limit_exceeded ip=%s max_requests_per_day=%s",
+            client_ip,
+            max_requests,
+        )
         raise HTTPException(
             status_code=429,
             detail={
                 "error": "Rate limit exceeded",
                 "message": f"Maximum {max_requests} requests per day exceeded",
-                "retry_after": "24 hours"
-            }
+                "retry_after": "24 hours",
+            },
         )
     
     return {"remaining_requests": remaining} 

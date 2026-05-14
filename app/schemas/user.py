@@ -1,69 +1,49 @@
-# schemas/user.py
-from pydantic import BaseModel, EmailStr, Field, field_validator
-from typing import Optional, List
-from datetime import datetime
+from datetime import date, datetime
+from typing import Optional
 
-class UserBase(BaseModel):
-    email: EmailStr
-    username: str = Field(..., min_length=3, max_length=50, pattern="^[a-zA-Z0-9_-]+$")
-    full_name: Optional[str] = Field(None, max_length=100)
-    gender: Optional[str] = None
-    age: Optional[int] = None
-    weight: Optional[float] = None
-    height: Optional[float] = None
-    goal_weight: Optional[float] = None
+from pydantic import BaseModel, EmailStr, Field, computed_field
 
-class UserCreate(UserBase):
-    password: str = Field(..., min_length=8, max_length=100)
-    
-    @field_validator('password', mode='after')
-    def validate_password(cls, v):
-        if len(v) < 8:
-            raise ValueError('Password must be at least 8 characters long')
-        if not any(c.isupper() for c in v):
-            raise ValueError('Password must contain at least one uppercase letter')
-        if not any(c.islower() for c in v):
-            raise ValueError('Password must contain at least one lowercase letter')
-        if not any(c.isdigit() for c in v):
-            raise ValueError('Password must contain at least one digit')
-        return v
 
 class UserUpdate(BaseModel):
-    email: Optional[EmailStr] = None
-    username: Optional[str] = Field(None, min_length=3, max_length=50, pattern="^[a-zA-Z0-9_-]+$")
     full_name: Optional[str] = Field(None, max_length=100)
-    password: Optional[str] = Field(None, min_length=8, max_length=100)
     avatar_url: Optional[str] = None
     gender: Optional[str] = None
     age: Optional[int] = None
-    weight: Optional[float] = None
-    height: Optional[float] = None
-    goal_weight: Optional[float] = None
+    weight: Optional[int] = None
+    height: Optional[int] = None
+    goal_weight: Optional[int] = None
 
-class UserInDB(UserBase):
+
+class StepGoalUpdate(BaseModel):
+    step_goal: int = Field(..., ge=1000, le=100_000)
+
+
+class UserResponse(BaseModel):
     id: int
-    is_superuser: bool = False
-    avatar_url: Optional[str] = None
-    created_at: datetime
-    updated_at: Optional[datetime] = None
-    
-    class Config:
-        from_attributes = True
-
-class UserResponse(UserInDB):
-    """Public user response - excludes sensitive data"""
-    pass
-
-class UserProfile(BaseModel):
-    """Extended user profile with additional fields"""
-    id: int
-    username: str
+    email: EmailStr
     full_name: Optional[str] = None
     avatar_url: Optional[str] = None
+    role: str = "user"
+    gender: Optional[str] = None
+    age: Optional[int] = None
+    weight: Optional[int] = None
+    height: Optional[int] = None
+    goal_weight: Optional[int] = None
+    step_goal: int = 8000
     created_at: datetime
-    
-    class Config:
-        from_attributes = True
+    updated_at: Optional[datetime] = None
 
-class User(UserInDB):
-    pass
+    model_config = {"from_attributes": True}
+
+
+class UserStreakResponse(BaseModel):
+    """Consecutive UTC calendar days with ≥1 `is_meal` image (steps do not affect streak)."""
+
+    current_streak: int = Field(..., ge=0)
+    longest_streak: int = Field(..., ge=0)
+    last_logged_date: Optional[date] = None
+
+    @computed_field
+    @property
+    def streak_days(self) -> int:
+        return self.current_streak

@@ -11,9 +11,9 @@ class ImageBase(BaseModel):
 
 class ImageCreate(ImageBase):
     filename: str
-    file_url: str  # S3 URL instead of file_path
-    s3_key: str    # S3 object key
-    s3_bucket: str # S3 bucket name
+    file_url: str
+    s3_key: str
+    s3_bucket: str
     file_size: int
     content_type: str
 
@@ -24,9 +24,9 @@ class ImageUpdate(BaseModel):
 class ImageInDB(ImageBase):
     id: int
     filename: str
-    file_url: str          # S3 URL
-    s3_key: str           # S3 object key
-    s3_bucket: str        # S3 bucket name
+    file_url: str
+    s3_key: str
+    s3_bucket: str
     file_size: int
     content_type: str
     description: Optional[str] = None
@@ -34,8 +34,7 @@ class ImageInDB(ImageBase):
     owner_id: int
     created_at: datetime
     updated_at: Optional[datetime] = None
-    
-    # Analysis fields
+
     is_food: Optional[bool] = None
     is_meal: Optional[bool] = False
     analysis_description: Optional[str] = None
@@ -44,7 +43,8 @@ class ImageInDB(ImageBase):
     nutrients: Optional[Dict[str, Any]] = None
     analysis_confidence: Optional[float] = None
     analysis_completed: Optional[datetime] = None
-    
+    meal_name: Optional[str] = None
+
     class Config:
         from_attributes = True
 
@@ -60,6 +60,7 @@ class ImageAnalysisData(BaseModel):
     """Analysis data structure"""
     is_food: bool
     is_meal: bool = False
+    meal_name: Optional[str] = None
     food_items: List[str]
     description: str
     calories: int

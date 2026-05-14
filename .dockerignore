@@ -4,9 +4,9 @@ __pycache__/
 *.pyd
 *.db
 .env
+.env.local
 .git/
 .gitignore
 uploads/
 .pytest_cache/
-migrations/versions/*.pyc
 .DS_Store 

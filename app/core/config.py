@@ -1,62 +1,61 @@
-from pydantic_settings import BaseSettings
-from typing import List, Optional
-import os
+from pathlib import Path
+from typing import Optional
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 class Settings(BaseSettings):
-  
+    model_config = SettingsConfigDict(
+        env_file=(".env", ".env.local"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
     database_url: str
 
-    
-    # Security
-    secret_key: str
-    algorithm: str = "HS256"
-    access_token_expire_minutes: int = 10080
+    frontend_url: str = Field(default="http://localhost:3000")
 
+    firebase_credentials_path: str
 
-    # Email settings
-    smtp_server: str
-    smtp_port: int
-    smtp_username: Optional[str] 
-    smtp_password: Optional[str] 
-    from_email: Optional[str]
+    llm_provider: str = Field(
+        default="gemini",
+        description="gemini | openai | groq | bedrock | ollama",
+    )
 
-  
-    # Frontend URL
-    frontend_url: str 
-    
-    # Rate limiting
-    password_reset_rate_limit: int = 3  # per hour
-    login_rate_limit: int = 5  # per minute
-    
-    # OpenAI
-    # openai_api_key: str
-    # Gemini 
-    gemini_api_key: str
-  
-     # Add these:
+    gemini_api_key: Optional[str] = None
+    gemini_model: str = "gemini-2.0-flash"
+
+    openai_api_key: Optional[str] = None
+    openai_model: str = "gpt-4o-mini"
+    openai_base_url: str = "https://api.openai.com/v1"
+
+    groq_api_key: Optional[str] = None
+    groq_model: str = "llama-3.2-11b-vision-preview"
+    groq_base_url: str = "https://api.groq.com/openai/v1"
+
+    ollama_base_url: str = "http://127.0.0.1:11434/v1"
+    ollama_model: str = "llava"
+    ollama_api_key: Optional[str] = None
+
+    bedrock_model_id: str = "anthropic.claude-3-5-sonnet-20240620-v1:0"
+
     aws_access_key_id: str
     aws_secret_access_key: str
-    aws_region: str
+    aws_region: str = "ap-south-1"
     aws_s3_bucket_name: str
-    default_avatar_url: str
-    
-    # File Upload
-    upload_dir: str = "uploads"
-  
-    
-    # Environment
-    environment: str = "development"
-    
-    # Google OAuth2
-    google_client_id: str   
-    google_client_secret: str
-    google_redirect_uri: str 
+    default_avatar_url: Optional[str] = None
 
-    
-    class Config:
-        env_file = ".env"
+    upload_dir: str = "uploads"
+
+    environment: str = "development"
+
+    public_analyze_daily_limit: int = 5
+    schema_auto_create: bool = False
+
+    def ensure_upload_dir(self) -> None:
+        Path(self.upload_dir).mkdir(parents=True, exist_ok=True)
+
 
 settings = Settings()
-
-# Create upload directory if it doesn't exist
-os.makedirs(settings.upload_dir, exist_ok=True)
+settings.ensure_upload_dir()

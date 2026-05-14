@@ -1,116 +1,103 @@
 # Dietly Backend
 
-### 1. Prerequisites
+FastAPI service for meal photos (pluggable vision LLM + S3), meal summaries, activity calories, and a rate-limited public food demo. Clients authenticate with a Firebase **ID token**: `Authorization: Bearer <token>`.
 
-- [Docker](https://www.docker.com/get-started)
-- [Docker Compose](https://docs.docker.com/compose/)
-- PostgreSQL instance
+## Prerequisites
 
-### 2. Environment Variables
+- Python 3.12+ (Dockerfile uses 3.13)
+- PostgreSQL
+- Firebase service account JSON, AWS S3
+- One configured **LLM provider** (Gemini, OpenAI, Groq, Ollama, or AWS Bedrock)
 
-Create a `.env` file in the project root. Example:
+## Environment
 
-```
-# Database
-DATABASE_URL=postgresql+psycopg2://<username>:<password>@<host>:5432/<dbname>
+Create `.env` or `.env.local` in the project root:
 
-# Security
-SECRET_KEY=your_secret_key
+```env
+DATABASE_URL=postgresql+psycopg2://postgres:postgres@localhost:5432/dietly
+SCHEMA_AUTO_CREATE=true
 
-# Frontend
 FRONTEND_URL=http://localhost:3000
 
-# Email (SMTP)
-SMTP_SERVER=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USERNAME=your_email@gmail.com
-SMTP_PASSWORD=your_email_password
-FROM_EMAIL=your_email@gmail.com
+FIREBASE_CREDENTIALS_PATH=/absolute/path/to/serviceAccount.json
 
-# AWS S3
-AWS_ACCESS_KEY_ID=your_aws_access_key_id
-AWS_SECRET_ACCESS_KEY=your_aws_secret_access_key
+# LLM_PROVIDER: gemini | openai | groq | bedrock | ollama
+LLM_PROVIDER=gemini
+
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-2.0-flash
+
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_BASE_URL=https://api.openai.com/v1
+
+GROQ_API_KEY=
+GROQ_MODEL=llama-3.2-11b-vision-preview
+GROQ_BASE_URL=https://api.groq.com/openai/v1
+
+# Ollama (OpenAI-compatible /v1; use a vision model, e.g. ollama pull llava)
+OLLAMA_BASE_URL=http://127.0.0.1:11434/v1
+OLLAMA_MODEL=llava
+# OLLAMA_API_KEY=   # optional; set if your Ollama proxy requires Bearer auth
+
+BEDROCK_MODEL_ID=anthropic.claude-3-5-sonnet-20240620-v1:0
+
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
 AWS_REGION=ap-south-1
-AWS_S3_BUCKET_NAME=your-s3-bucket-name
-DEFAULT_AVATAR_URL=https://your-bucket.s3.amazonaws.com/default-avatar.png
+AWS_S3_BUCKET_NAME=
 
-# File Upload
-UPLOAD_DIR=uploads
-
-# Rate Limiting (optional)
-PASSWORD_RESET_RATE_LIMIT=3
-LOGIN_RATE_LIMIT=5
-
-# Google OAuth2
-GOOGLE_CLIENT_ID=your_google_client_id
-GOOGLE_CLIENT_SECRET=your_google_client_secret
-GOOGLE_REDIRECT_URI=http://localhost:8000/api/v1/auth/google/callback
-
-# OpenAI / Gemini
-GEMINI_API_KEY=your_gemini_api_key
-
-# Environment
-ENVIRONMENT=development
+DEFAULT_AVATAR_URL=
+PUBLIC_ANALYZE_DAILY_LIMIT=5
 ```
 
-- Adjust values as needed for your deployment.
-- All variables above are referenced in the codebase (see `app/core/config.py`).
+Only the variables required for your chosen `LLM_PROVIDER` need to be set (plus shared AWS keys for S3). For Bedrock, the same credentials must allow `bedrock-runtime` inference on the chosen model in that region. For **Ollama**, run a vision-capable model locally (for example `ollama pull llava`) and point `OLLAMA_BASE_URL` at your server’s `/v1` endpoint; `OLLAMA_API_KEY` is optional.
 
-### 2a. Alembic Migrations and `migrations/env.py`
+**Note:** After changing `LLM_PROVIDER` or model env vars, restart the app process so the cached provider is rebuilt.
 
-The file `migrations/env.py` is the main configuration script for Alembic database migrations. It:
+## Run locally
 
-- Loads your app's SQLAlchemy models and metadata for schema generation.
-- Reads the database connection URL from your environment (typically from the `DATABASE_URL` variable in your `.env` file).
-- Controls how migrations are run, both in offline and online mode.
-
-**How it works:**
-
-- When you run `alembic upgrade head` (see below), Alembic uses `migrations/env.py` to connect to your database and apply migrations.
-- Make sure your `.env` file is set up and the `DATABASE_URL` is correct before running migrations.
-
-**Important: Registering Models for Autogeneration**
-
-To ensure Alembic is aware of all your models for schema autogeneration, make sure you have the following lines in your `migrations/env.py`:
-
-```python
-from app.core.database import Base
-from app.models import user, image, password_reset, email_verfication, pending_registration, user_calories
-
-target_metadata = Base.metadata
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-- This imports your SQLAlchemy `Base` and all model modules, so Alembic can detect all tables and relationships.
-- Setting `target_metadata = Base.metadata` tells Alembic which metadata to use for autogenerating migration scripts.
-- Without these imports, Alembic may not detect changes to your models, and `alembic revision --autogenerate -m "..."` may miss tables or columns.
+- API: http://localhost:8000  
+- OpenAPI: http://localhost:8000/docs  
 
-For more details, see the comments in `migrations/env.py`.
+## Docker
 
-### 3. Build and Run the App
+Copy `.env.example` to `.env` and set at least Firebase and AWS (or your LLM keys). Compose starts **Postgres 16** (`db`) and the API (`app`); `DATABASE_URL` is set in compose to `...@db:5432/dietly` so the app reaches the DB inside the network. Postgres is exposed on host port **5432** for local tools.
 
-```
-docker-compose up --build
-```
-
-- The API will be available at: [http://localhost:8000](http://localhost:8000)
-
-### 4. Check the App in Your Browser
-
-- Root endpoint: [http://localhost:8000](http://localhost:8000)
-- Interactive API docs: [http://localhost:8000/docs](http://localhost:8000/docs)
-
-### 5. Run Database Migrations
-
-To apply Alembic migrations to your database:
-
-```
-docker-compose exec app alembic upgrade head
+```bash
+docker compose up --build
 ```
 
-### 6. Stopping the App
+- API: http://localhost:8000  
+- With `SCHEMA_AUTO_CREATE=true` in `.env`, tables are created on first app startup.
 
-```
-docker-compose down
-```
+## Database
 
----
+With `SCHEMA_AUTO_CREATE=true`, the app creates tables from SQLAlchemy models on startup. Use `false` in production if another process owns the schema.
+
+## Auth and roles
+
+1. Sign in with Firebase on the client and send the Firebase **ID token** on each request.
+2. New users get `role = user` in the database.
+3. Admin APIs are under `/api/v1/admin/` and require `role = admin`. Grant the first admin by updating `users.role` in your database, then use `PATCH /api/v1/admin/users/{id}/role` for further changes. Dashboard counts: `GET /api/v1/admin/stats`. Global image moderation: `GET` / `DELETE /api/v1/admin/images/{image_id}`.
+
+Roles are defined in `app/core/roles.py`. Admin HTTP handlers use `app/controllers/`.
+
+## API overview
+
+| Prefix | Purpose |
+|--------|---------|
+| `/api/v1/users` | Current user (`/me`, `/me/avatar`, streak, net calories, steps goal) |
+| `/api/v1/admin/stats` | Admin: user / image counts |
+| `/api/v1/admin/users` | Admin: list (paginated + email filter), get, patch profile, delete, role, user images |
+| `/api/v1/admin/images` | Admin: get / delete any image by id |
+| `/api/v1/images` | Upload, analyze, list, presigned URLs, `is_meal` |
+| `/api/v1/meal` | Meal summaries from images |
+| `/api/v1/user-calories` | Activity calories |
+| `/api/v1/public` | Unauthenticated food analysis (IP rate limit) |

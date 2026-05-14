@@ -1,21 +1,40 @@
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
 from app.api.v1 import api_router
-from starlette.middleware.sessions import SessionMiddleware
-from datetime import datetime, timedelta
-from sqlalchemy.orm import Session
-from app.models.pending_registration import PendingRegistration
-from app.core.database import SessionLocal
 from app.core.config import settings
-import threading, time
+from app.core.database import Base, SessionLocal, engine, text
+from app.core.exception_handlers import register_exception_handlers
+from app.core.logging_config import configure_logging
+from app.middleware.request_logging import RequestLoggingMiddleware
+from app.models import daily_steps, image, streaks, user, user_calories  # noqa: F401
+from app.services.firebase_app import init_firebase
+
+logger = logging.getLogger(__name__)
+
+configure_logging()
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    init_firebase()
+    if settings.schema_auto_create:
+        Base.metadata.create_all(bind=engine)
+        logger.info("schema_auto_create: ensured tables exist (SQLAlchemy create_all)")
+    yield
+
 
 app = FastAPI(
-    title="FastAPI Image Analysis App",
-    description="A production-ready FastAPI application with user authentication and image analysis",
-    version="1.0.0"
+    title="Dietly API",
+    description="Food image analysis, meal tracking, and activity calories — Firebase-authenticated API.",
+    version="2.0.0",
+    lifespan=lifespan,
 )
 
-# CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.frontend_url],
@@ -23,47 +42,40 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(RequestLoggingMiddleware)
 
-# Add SessionMiddleware for OAuth support
-app.add_middleware(SessionMiddleware, secret_key=settings.secret_key)
+register_exception_handlers(app)
 
-# Include API router
 app.include_router(api_router, prefix="/api/v1")
+
 
 @app.get("/")
 def read_root():
-    return {"message": "FastAPI Image Analysis App is running!"}
+    return {"message": "Dietly API is running", "docs": "/docs"}
+
 
 @app.get("/health")
 def health_check():
     return {"status": "healthy"}
 
+
 @app.get("/health/db")
 def database_health_check():
-    """Check database connection health"""
     try:
         db = SessionLocal()
-        # Try a simple query to test connection
-        db.execute("SELECT 1")
-        db.close()
+        try:
+            db.execute(text("SELECT 1"))
+        finally:
+            db.close()
         return {"status": "healthy", "database": "connected"}
-    except Exception as e:
-        return {"status": "unhealthy", "database": "disconnected", "error": str(e)}
-
-def cleanup_pending_registrations():
-    db: Session = SessionLocal()
-    try:
-        cutoff = datetime.utcnow() - timedelta(days=1)
-        db.query(PendingRegistration).filter(PendingRegistration.created_at < cutoff).delete()
-        db.commit()
-    finally:
-        db.close()
-
-def schedule_cleanup():
-    while True:
-        cleanup_pending_registrations()
-        time.sleep(3600)  # Run every hour
-
-@app.on_event("startup")
-def start_cleanup_task():
-    threading.Thread(target=schedule_cleanup, daemon=True).start()
+    except Exception:
+        logger.exception("DB health check failed")
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "unhealthy",
+                "database": "disconnected",
+                "detail": "Database is not reachable.",
+                "message": "Database is not reachable.",
+            },
+        )
