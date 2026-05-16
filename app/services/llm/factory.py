@@ -46,6 +46,8 @@ def _build_vision_llm() -> VisionLLMProvider:
         )
 
     if provider == "bedrock":
+        if not settings.aws_access_key_id or not settings.aws_secret_access_key:
+            raise ValueError("AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are required when LLM_PROVIDER=bedrock")
         return BedrockProvider(
             region=settings.aws_region,
             model_id=settings.bedrock_model_id,

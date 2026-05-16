@@ -21,7 +21,7 @@ def admin_get_image(
     return detail
 
 
-@router.delete("/{image_id}", summary="Delete an image (S3 + DB, any owner)")
+@router.delete("/{image_id}", summary="Delete an image (file on disk + DB, any owner)")
 def admin_delete_image(
     image_id: int,
     db: Session = Depends(get_db),
@@ -31,7 +31,7 @@ def admin_delete_image(
     if not ok:
         if err == "not_found":
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
-        if err == "s3_failed":
+        if err == "storage_failed":
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="Could not delete object from storage",

@@ -3,7 +3,7 @@
 **Mobile-first:** `POST /upload-and-analyze` (multipart + optional caption) is the primary log-meal
 flow. **Web+Mobile:** list, detail, presigned URL refresh, `is_meal` correction, relog.
 
-**Dev only:** `POST /test-llm`, `POST /{image_id}/test` — not for production app builds.
+**Dev only:** `POST /test-llm`, `POST /{image_id}/test` — diagnostics, not part of the main client flow.
 """
 
 import logging
@@ -132,7 +132,7 @@ async def get_suggested_meal_name(
 
 @router.post(
     "/{image_id}/relog",
-    summary="[Mobile-first] Duplicate meal log (same S3 object, new row)",
+    summary="[Mobile-first] Duplicate meal log (same file, new row)",
     description="Quick re-log of a previous meal without re-uploading the file.",
 )
 async def relog_image(
@@ -200,8 +200,8 @@ async def delete_image(
 
 @router.post(
     "/{image_id}/test",
-    summary="[Dev only] S3 + LLM smoke test for one image",
-    description="Diagnostics; do not ship to production mobile/web clients.",
+    summary="[Dev only] Storage + LLM smoke test for one image",
+    description="Diagnostics for local use; omit from shipped mobile/web clients.",
 )
 async def test_image_processing(
     image_id: int,
@@ -209,7 +209,7 @@ async def test_image_processing(
     current_user: User = Depends(get_current_user),
 ):
     image_service = ImageService(db)
-    return await image_service.test_s3_and_analysis(image_id, current_user.id)
+    return await image_service.test_storage_and_analysis(image_id, current_user.id)
 
 
 @router.post(

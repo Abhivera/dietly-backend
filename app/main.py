@@ -1,18 +1,20 @@
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.v1 import api_router
 from app.core.config import settings
 from app.core.database import Base, SessionLocal, engine, text
 from app.core.exception_handlers import register_exception_handlers
+from app.core.schema_patch import apply_postgres_users_jwt_schema
 from app.core.logging_config import configure_logging
 from app.middleware.request_logging import RequestLoggingMiddleware
 from app.models import daily_steps, image, streaks, user, user_calories  # noqa: F401
-from app.services.firebase_app import init_firebase
 
 logger = logging.getLogger(__name__)
 
@@ -21,16 +23,16 @@ configure_logging()
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    init_firebase()
     if settings.schema_auto_create:
         Base.metadata.create_all(bind=engine)
         logger.info("schema_auto_create: ensured tables exist (SQLAlchemy create_all)")
+    apply_postgres_users_jwt_schema(engine)
     yield
 
 
 app = FastAPI(
     title="Dietly API",
-    description="Food image analysis, meal tracking, and activity calories — Firebase-authenticated API.",
+    description="Food image analysis, meal tracking, and activity calories — JWT-authenticated API.",
     version="2.0.0",
     lifespan=lifespan,
 )
@@ -45,6 +47,13 @@ app.add_middleware(
 app.add_middleware(RequestLoggingMiddleware)
 
 register_exception_handlers(app)
+
+Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
+app.mount(
+    "/media",
+    StaticFiles(directory=settings.upload_dir),
+    name="media",
+)
 
 app.include_router(api_router, prefix="/api/v1")
 

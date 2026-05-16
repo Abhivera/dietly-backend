@@ -20,7 +20,7 @@ from app.models.user import User
 from app.models.user_calories import UserCalories
 from app.schemas.net_calories import NetCaloriesResponse
 from app.schemas.user import StepGoalUpdate, UserResponse, UserStreakResponse, UserUpdate
-from app.services.s3_service import S3Service
+from app.services.media_storage import MediaStorageService
 from app.services.streak_service import sync_user_streak
 
 router = APIRouter()
@@ -125,7 +125,7 @@ def read_user_me(current_user: User = Depends(get_current_user)):
     "/me",
     response_model=UserResponse,
     summary="[Mobile+Web] Update profile fields",
-    description="Body metrics and display name; not for email/Firebase (handled by auth provider).",
+    description="Body metrics and display name; not for email or password (use auth endpoints).",
 )
 def update_user_me(
     user_update: UserUpdate,
@@ -160,19 +160,24 @@ def patch_user_step_goal(
     "/me/avatar",
     response_model=UserResponse,
     summary="[Mobile+Web] Upload profile photo",
-    description="Multipart image upload to object storage; common from mobile camera/gallery.",
+    description="Multipart image upload; file is saved under UPLOAD_DIR and served via /media.",
 )
 def upload_user_avatar(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    s3_service = S3Service()
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File must be an image",
+        )
+    storage = MediaStorageService()
     file_content = file.file.read()
     from io import BytesIO
 
     file_obj = BytesIO(file_content)
-    upload_result = s3_service.upload_file_with_public_access(
+    upload_result = storage.upload_file_with_public_access(
         file_obj, str(current_user.id), file.filename or "avatar.jpg"
     )
     if not upload_result.get("success"):

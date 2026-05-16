@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.models.image import Image
 from app.services.image_service import ImageService
-from app.services.s3_service import S3Service
+from app.services.media_storage import MediaStorageService
 from app.services.streak_service import sync_user_streak
 
 logger = logging.getLogger(__name__)
@@ -24,15 +24,15 @@ def get_image_detail_for_admin(db: Session, image_id: int) -> dict | None:
 
 
 def delete_image_by_id(db: Session, image_id: int) -> tuple[bool, str]:
-    """Delete any image by id (S3 + row). Returns (ok, error_code_or_empty)."""
+    """Delete stored file and DB row. Returns (ok, error_code_or_empty)."""
     image = db.query(Image).filter(Image.id == image_id).first()
     if image is None:
         return False, "not_found"
     owner_id = image.owner_id
-    s3 = S3Service()
+    storage = MediaStorageService()
     try:
-        if not s3.delete_file(image.s3_key):
-            return False, "s3_failed"
+        if not storage.delete_file(image.s3_key):
+            return False, "storage_failed"
         db.delete(image)
         db.commit()
     except Exception:

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.meal_rules import infer_is_meal
 from app.models.image import Image
 from app.services.llm_service import LLMService
-from app.services.s3_service import S3Service
+from app.services.media_storage import MediaStorageService
 from app.services.streak_service import sync_user_streak
 import logging
 from io import BytesIO
@@ -27,7 +27,7 @@ class ImageService:
     def __init__(self, db: Session):
         self.db = db
         self.llm_service = LLMService()
-        self.s3_service = S3Service()
+        self.media_storage = MediaStorageService()
 
     def _sync_streak_safe(self, user_id: int) -> None:
         try:
@@ -36,7 +36,7 @@ class ImageService:
             logger.exception("sync_user_streak failed for user_id=%s", user_id)
 
     async def upload_and_analyze_image(self, file_obj, user_id: int, original_filename: str, file_size: int, content_type: str, user_description: str = None) -> Dict:
-        """Upload image to S3 and analyze it using content from memory. Optionally use user description."""
+        """Save image to disk and analyze it using content from memory. Optionally use user description."""
         try:
             # Reset file pointer to beginning
             file_obj.seek(0)
@@ -44,11 +44,10 @@ class ImageService:
             # Read content for analysis before upload
             image_content = file_obj.read()
             
-            # Reset file pointer for S3 upload
+            # Reset file pointer for storage upload
             file_obj.seek(0)
-            
-            # Upload to S3
-            upload_result = self.s3_service.upload_file(file_obj, user_id, original_filename)
+
+            upload_result = self.media_storage.upload_file(file_obj, user_id, original_filename)
 
             if not upload_result['success']:
                 return {"error": upload_result['error']}
@@ -69,7 +68,7 @@ class ImageService:
             self.db.commit()
             self.db.refresh(image)
 
-            # Analyze using image content from memory instead of S3 URL
+            # Analyze using image content from memory (no remote fetch)
             analysis = await self.llm_service.analyze_image_content(
                 image_content, content_type, description=user_description
             )
@@ -118,10 +117,10 @@ class ImageService:
             return {"error": f"Upload and analysis failed: {str(e)}"}
 
     async def upload_image_only(self, file_obj, original_filename: str, file_size: int, content_type: str, user_id: int) -> Dict:
-        """Upload image to S3 without analysis"""
+        """Upload image to disk without analysis."""
         try:
             file_obj.seek(0)
-            upload_result = self.s3_service.upload_file(file_obj, user_id, original_filename)
+            upload_result = self.media_storage.upload_file(file_obj, user_id, original_filename)
 
             if not upload_result['success']:
                 return {"error": upload_result['error']}
@@ -152,10 +151,10 @@ class ImageService:
             return {"error": f"Upload failed: {str(e)}"}
 
     async def upload_image_with_analysis(self, file_obj, original_filename: str, file_size: int, content_type: str, user_id: int, analysis: Dict) -> Dict:
-        """Upload image to S3 with pre-computed analysis"""
+        """Upload image to disk with pre-computed analysis."""
         try:
             file_obj.seek(0)
-            upload_result = self.s3_service.upload_file(file_obj, user_id, original_filename)
+            upload_result = self.media_storage.upload_file(file_obj, user_id, original_filename)
 
             if not upload_result['success']:
                 return {"error": upload_result['error']}
@@ -238,7 +237,7 @@ class ImageService:
             return {"error": f"Update failed: {str(e)}"}
 
     async def analyze_existing_image(self, image_id: int, user_id: int) -> Dict:
-        """Re-analyze an image using bytes loaded from S3 only."""
+        """Re-analyze an image using bytes loaded from disk only."""
         try:
             image = self.db.query(Image).filter(
                 Image.id == image_id,
@@ -248,9 +247,9 @@ class ImageService:
             if not image:
                 return {"error": "Image not found or access denied"}
 
-            image_content = self.s3_service.get_file_content(image.s3_key)
+            image_content = self.media_storage.get_file_content(image.s3_key)
             if not image_content:
-                return {"error": "Image bytes not available from object storage"}
+                return {"error": "Image bytes not available from storage"}
 
             analysis = await self.llm_service.analyze_image_content(image_content, image.content_type)
 
@@ -301,7 +300,7 @@ class ImageService:
             return {"error": f"Analysis failed: {str(e)}"}
 
     def delete_image(self, image_id: int, user_id: int) -> Dict:
-        """Delete image and remove from S3"""
+        """Delete image row and file on disk."""
         try:
             image = self.db.query(Image).filter(
                 Image.id == image_id,
@@ -311,8 +310,8 @@ class ImageService:
             if not image:
                 return {"error": "Image not found or access denied"}
 
-            if not self.s3_service.delete_file(image.s3_key):
-                return {"error": "Could not delete file from object storage"}
+            if not self.media_storage.delete_file(image.s3_key):
+                return {"error": "Could not delete file from storage"}
 
             self.db.delete(image)
             self.db.commit()
@@ -381,19 +380,23 @@ class ImageService:
             images = query.offset(skip).limit(limit).all()
             now = datetime.now(timezone.utc)
             result = []
+            dirty = False
             for img in images:
                 img_dict = img.to_dict()
                 if img.presigned_url and img.presigned_url_expires_at and img.presigned_url_expires_at > now:
                     img_dict['file_url'] = img.presigned_url
                 else:
-                    presigned_url = self.s3_service.generate_presigned_url(img.s3_key, 86400)
+                    presigned_url = self.media_storage.generate_presigned_url(img.s3_key, 86400)
                     if not presigned_url:
                         raise RuntimeError("Could not generate presigned URL")
                     img.presigned_url = presigned_url
                     img.presigned_url_expires_at = now + timedelta(seconds=86400)
-                    self.db.commit()
                     img_dict['file_url'] = presigned_url
+                    dirty = True
                 result.append(img_dict)
+            
+            if dirty:
+                self.db.commit()
             return result
         except ValueError:
             raise
@@ -414,7 +417,7 @@ class ImageService:
             if image.presigned_url and image.presigned_url_expires_at and image.presigned_url_expires_at > now:
                 presigned_url = image.presigned_url
             else:
-                presigned_url = self.s3_service.generate_presigned_url(image.s3_key, 86400)
+                presigned_url = self.media_storage.generate_presigned_url(image.s3_key, 86400)
                 if not presigned_url:
                     return None
                 image.presigned_url = presigned_url
@@ -479,7 +482,7 @@ class ImageService:
         self._sync_streak_safe(user_id)
         return {"success": True, "image": new_img.to_dict()}
 
-    async def test_s3_and_analysis(self, image_id: int, user_id: int) -> Dict:
+    async def test_storage_and_analysis(self, image_id: int, user_id: int) -> Dict:
         try:
             image = self.db.query(Image).filter(
                 Image.id == image_id,
@@ -492,7 +495,7 @@ class ImageService:
             results = {
                 "image_info": {
                     "id": image.id,
-                    "s3_key": image.s3_key,
+                    "storage_key": image.s3_key,
                     "file_url": image.file_url,
                     "content_type": image.content_type
                 },
@@ -500,13 +503,13 @@ class ImageService:
             }
 
             try:
-                s3_content = self.s3_service.get_file_content(image.s3_key)
-                results["tests"]["s3_content_access"] = {
-                    "success": bool(s3_content),
-                    "content_size": len(s3_content) if s3_content else 0
+                file_bytes = self.media_storage.get_file_content(image.s3_key)
+                results["tests"]["file_read"] = {
+                    "success": bool(file_bytes),
+                    "content_size": len(file_bytes) if file_bytes else 0
                 }
             except Exception as e:
-                results["tests"]["s3_content_access"] = {
+                results["tests"]["file_read"] = {
                     "success": False,
                     "error": str(e)
                 }
@@ -525,5 +528,5 @@ class ImageService:
             return results
 
         except Exception as e:
-            logger.exception("test_s3_and_analysis failed")
+            logger.exception("test_storage_and_analysis failed")
             return {"error": f"Test failed: {str(e)}"}

@@ -24,7 +24,7 @@ class AdminUserImagesListResponse(BaseModel):
 
 
 class AdminUserProfilePatch(BaseModel):
-    """Support edits only — does not change `email`, `firebase_uid`, or `role` (use PATCH .../role)."""
+    """Support edits only — does not change `email`, password hash, or `role` (use PATCH .../role)."""
 
     full_name: Optional[str] = Field(None, max_length=100)
     avatar_url: Optional[str] = None

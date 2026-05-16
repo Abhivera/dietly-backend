@@ -3,12 +3,12 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: dietly
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PUBLISH_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d dietly"]
       interval: 5s
@@ -16,23 +16,45 @@ services:
       retries: 10
       start_period: 10s
     restart: unless-stopped
+    networks:
+      - dietly
 
   app:
-    build: .
-    command: gunicorn app.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --timeout 120
+    build:
+      context: .
+      dockerfile: Dockerfile
     depends_on:
       db:
         condition: service_healthy
     volumes:
-      - .:/app
+      - app_uploads:/app/uploads
     env_file:
       - .env
     environment:
-      # Overrides host `.env` so the API reaches Postgres by service name, not localhost.
-      DATABASE_URL: postgresql+psycopg2://postgres:postgres@db:5432/dietly
+      # Overrides host-oriented DATABASE_URL from .env when the API runs in this network.
+      DATABASE_URL: postgresql+psycopg2://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/dietly
     ports:
-      - "8000:8000"
+      - "${APP_PUBLISH_PORT:-8000}:8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4)",
+        ]
+      interval: 30s
+      timeout: 6s
+      retries: 3
+      start_period: 50s
     restart: unless-stopped
+    networks:
+      - dietly
+
+networks:
+  dietly:
+    driver: bridge
 
 volumes:
   postgres_data:
+  app_uploads:

@@ -55,7 +55,7 @@ def admin_get_user(
     return user
 
 
-@router.patch("/{user_id}", response_model=UserResponse, summary="Update user profile (not email/role/Firebase id)")
+@router.patch("/{user_id}", response_model=UserResponse, summary="Update user profile (not email, password, or role)")
 def admin_patch_user_profile(
     user_id: int,
     body: AdminUserProfilePatch,

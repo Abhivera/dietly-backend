@@ -1,6 +1,6 @@
 """**Unauthenticated** food image analysis (try-before-signup, marketing landing pages).
 
-**Web-first / share:** no Firebase token; IP-based daily rate limit. **Mobile:** avoid for the
+**Web-first / share:** no JWT; IP-based daily rate limit. **Mobile:** avoid for the
 main app — use authenticated `POST /images/upload-and-analyze` so meals are saved to the user.
 """
 

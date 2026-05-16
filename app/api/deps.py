@@ -1,16 +1,15 @@
 import logging
-
 from typing import Annotated
 
+import jwt
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from firebase_admin import auth as firebase_auth
 from sqlalchemy.orm import Session
 
 from app.core.client_ip import get_client_ip
-from app.core.config import settings
 from app.core.database import get_db
-from app.core.roles import UserRole, is_admin
+from app.core.roles import is_admin
+from app.core.security import decode_access_token
 from app.models.user import User
 
 security = HTTPBearer(auto_error=True)
@@ -27,68 +26,41 @@ def get_current_user(
     db: Annotated[Session, Depends(get_db)],
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
 ) -> User:
-    """Verify Firebase ID token and return the app user (auto-provision on first login)."""
+    """Resolve user from JWT (`Authorization: Bearer <token>`)."""
     ip = _client_ip(request)
-    id_token = credentials.credentials
+    token = credentials.credentials
+
     try:
-        claims = firebase_auth.verify_id_token(id_token, check_revoked=False)
-    except Exception as exc:
-        logger.warning(
-            "auth_verify_failed ip=%s reason=invalid_or_expired_token error=%s",
-            ip,
-            exc,
-        )
+        payload = decode_access_token(token)
+    except jwt.ExpiredSignatureError as exc:
+        logger.warning("auth_failed ip=%s reason=jwt_expired", ip)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired Firebase token",
+            detail="Token expired",
+        ) from exc
+    except jwt.InvalidTokenError as exc:
+        logger.warning("auth_failed ip=%s reason=invalid_jwt", ip)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or malformed token",
         ) from exc
 
-    uid = claims.get("uid")
-    if not uid:
-        logger.warning("auth_failed ip=%s reason=token_missing_uid", ip)
+    sub = payload.get("sub")
+    if not isinstance(sub, str) or not sub.isdigit():
+        logger.warning("auth_failed ip=%s reason=jwt_missing_sub", ip)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token missing uid",
+            detail="Invalid token payload",
         )
 
-    user = db.query(User).filter(User.firebase_uid == uid).first()
-    if user:
-        return user
-
-    email = claims.get("email")
-    if not email:
-        logger.warning("auth_failed ip=%s reason=token_missing_email uid=%s", ip, uid)
+    user_id = int(sub)
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None:
+        logger.warning("auth_failed ip=%s reason=user_not_found user_id=%s", ip, user_id)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Firebase token must include an email claim",
+            detail="User not found",
         )
-
-    full_name = claims.get("name") or email.split("@")[0]
-    picture = claims.get("picture")
-
-    user = User(
-        firebase_uid=uid,
-        email=email,
-        full_name=full_name,
-        avatar_url=picture or settings.default_avatar_url,
-        role=UserRole.user.value,
-    )
-    db.add(user)
-    try:
-        db.commit()
-        db.refresh(user)
-    except Exception as exc:
-        db.rollback()
-        logger.exception(
-            "user_provision_failed ip=%s firebase_uid=%s email=%s",
-            ip,
-            uid,
-            email,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Could not create user profile",
-        ) from exc
 
     return user
 

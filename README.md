@@ -1,103 +1,64 @@
 # Dietly Backend
 
-FastAPI service for meal photos (pluggable vision LLM + S3), meal summaries, activity calories, and a rate-limited public food demo. Clients authenticate with a Firebase **ID token**: `Authorization: Bearer <token>`.
+FastAPI API with JWT auth. **PostgreSQL runs in Docker Compose.** Configure secrets via `.env` (copy from `.env.example`).
 
-## Prerequisites
+## Requirements
 
-- Python 3.12+ (Dockerfile uses 3.13)
-- PostgreSQL
-- Firebase service account JSON, AWS S3
-- One configured **LLM provider** (Gemini, OpenAI, Groq, Ollama, or AWS Bedrock)
+- Docker & Docker Compose
+- LLM provider keys as needed (`LLM_PROVIDER` in `.env`; use `AWS_*` only when `LLM_PROVIDER=bedrock`)
 
-## Environment
+## Configuration
 
-Create `.env` or `.env.local` in the project root:
+1. Copy `.env.example` → `.env`
+2. Set **`JWT_SECRET_KEY`** (long random string, ≥16 characters).
+3. Set **`POSTGRES_PASSWORD`** and the matching password inside **`DATABASE_URL`** when connecting from the host.
 
-```env
-DATABASE_URL=postgresql+psycopg2://postgres:postgres@localhost:5432/dietly
-SCHEMA_AUTO_CREATE=true
+Compose substitutes **`POSTGRES_PASSWORD`** into the **`db`** service and into the **`app`** container’s `DATABASE_URL` (`...@db:5432/dietly`).  
+Your **`DATABASE_URL`** in `.env` should point at **`127.0.0.1:5432`** when you run clients or uvicorn on the host against the published Postgres port.
 
-FRONTEND_URL=http://localhost:3000
+## Run
 
-FIREBASE_CREDENTIALS_PATH=/absolute/path/to/serviceAccount.json
-
-# LLM_PROVIDER: gemini | openai | groq | bedrock | ollama
-LLM_PROVIDER=gemini
-
-GEMINI_API_KEY=
-GEMINI_MODEL=gemini-2.0-flash
-
-OPENAI_API_KEY=
-OPENAI_MODEL=gpt-4o-mini
-OPENAI_BASE_URL=https://api.openai.com/v1
-
-GROQ_API_KEY=
-GROQ_MODEL=llama-3.2-11b-vision-preview
-GROQ_BASE_URL=https://api.groq.com/openai/v1
-
-# Ollama (OpenAI-compatible /v1; use a vision model, e.g. ollama pull llava)
-OLLAMA_BASE_URL=http://127.0.0.1:11434/v1
-OLLAMA_MODEL=llava
-# OLLAMA_API_KEY=   # optional; set if your Ollama proxy requires Bearer auth
-
-BEDROCK_MODEL_ID=anthropic.claude-3-5-sonnet-20240620-v1:0
-
-AWS_ACCESS_KEY_ID=
-AWS_SECRET_ACCESS_KEY=
-AWS_REGION=ap-south-1
-AWS_S3_BUCKET_NAME=
-
-DEFAULT_AVATAR_URL=
-PUBLIC_ANALYZE_DAILY_LIMIT=5
-```
-
-Only the variables required for your chosen `LLM_PROVIDER` need to be set (plus shared AWS keys for S3). For Bedrock, the same credentials must allow `bedrock-runtime` inference on the chosen model in that region. For **Ollama**, run a vision-capable model locally (for example `ollama pull llava`) and point `OLLAMA_BASE_URL` at your server’s `/v1` endpoint; `OLLAMA_API_KEY` is optional.
-
-**Note:** After changing `LLM_PROVIDER` or model env vars, restart the app process so the cached provider is rebuilt.
-
-## Run locally
+**Docker Compose (default)** — app code from the image, uploads in a named volume:
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+docker compose up --build -d
 ```
 
-- API: http://localhost:8000  
-- OpenAPI: http://localhost:8000/docs  
-
-## Docker
-
-Copy `.env.example` to `.env` and set at least Firebase and AWS (or your LLM keys). Compose starts **Postgres 16** (`db`) and the API (`app`); `DATABASE_URL` is set in compose to `...@db:5432/dietly` so the app reaches the DB inside the network. Postgres is exposed on host port **5432** for local tools.
+**With reload** — bind-mounted source and `uvicorn --reload` (same Postgres service):
 
 ```bash
-docker compose up --build
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 ```
 
-- API: http://localhost:8000  
-- With `SCHEMA_AUTO_CREATE=true` in `.env`, tables are created on first app startup.
+- API: http://localhost:8000 (or the host port you set with `APP_PUBLISH_PORT` in `.env`)  
+- Docs: http://localhost:8000/docs  
 
-## Database
+Postgres: service **`db`**, database **`dietly`**, user **`postgres`**. The **`app`** container always gets `DATABASE_URL` pointed at host **`db`** via Compose overrides; keep `DATABASE_URL` in `.env` on **`127.0.0.1`** for host-side tools or local uvicorn against the published DB port.
 
-With `SCHEMA_AUTO_CREATE=true`, the app creates tables from SQLAlchemy models on startup. Use `false` in production if another process owns the schema.
+## Schema
 
-## Auth and roles
+Use **`SCHEMA_AUTO_CREATE=true`** once on an empty database if you are not applying migrations yet; set **`false`** afterward.
 
-1. Sign in with Firebase on the client and send the Firebase **ID token** on each request.
-2. New users get `role = user` in the database.
-3. Admin APIs are under `/api/v1/admin/` and require `role = admin`. Grant the first admin by updating `users.role` in your database, then use `PATCH /api/v1/admin/users/{id}/role` for further changes. Dashboard counts: `GET /api/v1/admin/stats`. Global image moderation: `GET` / `DELETE /api/v1/admin/images/{image_id}`.
+On startup, Postgres runs a small idempotent patch so **`users.password_hash`** exists and is NOT NULL.
 
-Roles are defined in `app/core/roles.py`. Admin HTTP handlers use `app/controllers/`.
+## Auth
+
+- `POST /api/v1/auth/register` — `{ "email", "password", "full_name?" }`
+- `POST /api/v1/auth/login` — `{ "email", "password" }`
+- Protected routes: `Authorization: Bearer <access_token>`
+
+Admin routes: `/api/v1/admin/*` (role `admin` in DB).
 
 ## API overview
 
 | Prefix | Purpose |
 |--------|---------|
-| `/api/v1/users` | Current user (`/me`, `/me/avatar`, streak, net calories, steps goal) |
-| `/api/v1/admin/stats` | Admin: user / image counts |
-| `/api/v1/admin/users` | Admin: list (paginated + email filter), get, patch profile, delete, role, user images |
-| `/api/v1/admin/images` | Admin: get / delete any image by id |
-| `/api/v1/images` | Upload, analyze, list, presigned URLs, `is_meal` |
-| `/api/v1/meal` | Meal summaries from images |
+| `/api/v1/auth` | Register, login → JWT |
+| `/api/v1/users` | Profile, streak, calories, steps goal |
+| `/api/v1/admin/stats` | Admin counts |
+| `/api/v1/admin/users` | Admin user management |
+| `/api/v1/admin/images` | Admin image delete |
+| `/api/v1/images` | Meal photos, analysis |
+| `/api/v1/meal` | Meal summaries |
 | `/api/v1/user-calories` | Activity calories |
-| `/api/v1/public` | Unauthenticated food analysis (IP rate limit) |
+| `/api/v1/public` | Rate-limited public analyze |

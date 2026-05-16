@@ -1,13 +1,13 @@
 from pathlib import Path
 from typing import Optional
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=(".env", ".env.local"),
+        env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -16,7 +16,27 @@ class Settings(BaseSettings):
 
     frontend_url: str = Field(default="http://localhost:3000")
 
-    firebase_credentials_path: str
+    jwt_secret_key: str = Field(
+        min_length=16,
+        description="HS256 signing secret for JWT access tokens",
+    )
+
+    jwt_access_token_expire_minutes: int = Field(
+        default=60 * 24 * 7,
+        ge=5,
+        le=60 * 24 * 365,
+        description="Access token lifetime in minutes",
+    )
+
+    @field_validator("jwt_secret_key", mode="before")
+    @classmethod
+    def strip_jwt_secret(cls, v: object) -> object:
+        if isinstance(v, str):
+            return v.strip()
+        return v
+
+    # Base URL for ``file_url`` / ``/media/...`` links (e.g. http://127.0.0.1:8000 or LAN IP for mobile).
+    public_media_base_url: str = "http://127.0.0.1:8000"
 
     llm_provider: str = Field(
         default="gemini",
@@ -40,10 +60,9 @@ class Settings(BaseSettings):
 
     bedrock_model_id: str = "anthropic.claude-3-5-sonnet-20240620-v1:0"
 
-    aws_access_key_id: str
-    aws_secret_access_key: str
+    aws_access_key_id: Optional[str] = None
+    aws_secret_access_key: Optional[str] = None
     aws_region: str = "ap-south-1"
-    aws_s3_bucket_name: str
     default_avatar_url: Optional[str] = None
 
     upload_dir: str = "uploads"

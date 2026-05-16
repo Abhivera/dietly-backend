@@ -9,8 +9,8 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    firebase_uid = Column(String(128), unique=True, index=True, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
+    password_hash = Column(String(255), nullable=False)
     full_name = Column(String, nullable=True)
     avatar_url = Column(String, nullable=True)
 
@@ -37,4 +37,4 @@ class User(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<User(id={self.id}, firebase_uid='{self.firebase_uid}', email='{self.email}')>"
+        return f"<User(id={self.id}, email='{self.email}')>"

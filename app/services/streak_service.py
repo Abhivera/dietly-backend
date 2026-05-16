@@ -38,6 +38,11 @@ def _anchored_current_streak(dates: set[date], today: date) -> tuple[int, date |
     max_d = max(dates)
     if max_d > today:
         max_d = today
+
+    # If the user hasn't logged today or yesterday, the current streak is broken (0).
+    if (today - max_d).days > 1:
+        return 0, max_d
+
     anchor = max_d
     cnt = 0
     d = anchor
