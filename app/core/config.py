@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     openai_base_url: str = "https://api.openai.com/v1"
 
     groq_api_key: Optional[str] = None
-    groq_model: str = "llama-3.2-11b-vision-preview"
+    groq_model: str = "meta-llama/llama-4-scout-17b-16e-instruct"
     groq_base_url: str = "https://api.groq.com/openai/v1"
 
     ollama_base_url: str = "http://127.0.0.1:11434/v1"

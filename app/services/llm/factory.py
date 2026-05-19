@@ -42,7 +42,7 @@ def _build_vision_llm() -> VisionLLMProvider:
             base_url=settings.groq_base_url,
             model=settings.groq_model,
             name="Groq",
-            use_json_response_format=False,
+            use_json_response_format=True,
         )
 
     if provider == "bedrock":

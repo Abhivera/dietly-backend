@@ -33,6 +33,10 @@ class OpenAICompatibleProvider(VisionLLMProvider):
         self._model = model
         self._name = name
         self._use_json = use_json_response_format
+        if name == "Groq":
+            err = shared.groq_vision_model_error(model)
+            if err:
+                raise ValueError(err)
 
     def _headers(self) -> dict[str, str]:
         headers: dict[str, str] = {"Content-Type": "application/json"}
@@ -81,6 +85,10 @@ class OpenAICompatibleProvider(VisionLLMProvider):
         content_type: str | None,
         description: str | None = None,
     ) -> dict[str, Any]:
+        if self._name == "Groq":
+            err = shared.groq_vision_model_error(self._model)
+            if err:
+                return shared.error_result(err)
         try:
             b64, mime = shared.encode_image_bytes(image_content, content_type)
             prompt = shared.build_vision_prompt(description)

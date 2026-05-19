@@ -13,6 +13,31 @@ from PIL import Image
 
 logger = logging.getLogger(__name__)
 
+# Groq text-only models reject multimodal `content` arrays with HTTP 400.
+GROQ_VISION_MODEL_ID = "meta-llama/llama-4-scout-17b-16e-instruct"
+
+
+def groq_vision_model_error(model: str) -> str | None:
+    """Return a user-facing error if *model* is unlikely to accept image input on Groq."""
+    m = model.strip().lower()
+    if "vision" in m or "scout" in m or "llama-4" in m:
+        return None
+    text_only_hints = (
+        "llama-3.1-8b",
+        "llama-3.3-70b",
+        "llama-3.1-70b",
+        "whisper",
+        "gpt-oss",
+        "mixtral",
+        "gemma2",
+    )
+    if any(hint in m for hint in text_only_hints):
+        return (
+            f"GROQ_MODEL={model!r} is text-only and cannot analyze images. "
+            f"Set GROQ_MODEL={GROQ_VISION_MODEL_ID!r} (see Groq vision docs)."
+        )
+    return None
+
 
 def vision_json_instructions() -> str:
     return (
