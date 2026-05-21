@@ -1,4 +1,4 @@
-# Dietly Backend
+# Calovia Backend
 
 FastAPI API with JWT auth. **PostgreSQL runs in Docker Compose.** Configure secrets via `.env` (copy from `.env.example`).
 
@@ -13,7 +13,7 @@ FastAPI API with JWT auth. **PostgreSQL runs in Docker Compose.** Configure secr
 2. Set **`JWT_SECRET_KEY`** (long random string, ≥16 characters).
 3. Set **`POSTGRES_PASSWORD`** and the matching password inside **`DATABASE_URL`** when connecting from the host.
 
-Compose substitutes **`POSTGRES_PASSWORD`** into the **`db`** service and into the **`app`** container’s `DATABASE_URL` (`...@db:5432/dietly`).  
+Compose substitutes **`POSTGRES_PASSWORD`** into the **`db`** service and into the **`app`** container’s `DATABASE_URL` (`...@db:5432/calovia`).  
 Your **`DATABASE_URL`** in `.env` should point at **`127.0.0.1:5432`** when you run clients or uvicorn on the host against the published Postgres port.
 
 ## Run
@@ -33,7 +33,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 - API: http://localhost:8000 (or the host port you set with `APP_PUBLISH_PORT` in `.env`)  
 - Docs: http://localhost:8000/docs  
 
-Postgres: service **`db`**, database **`dietly`**, user **`postgres`**. The **`app`** container always gets `DATABASE_URL` pointed at host **`db`** via Compose overrides; keep `DATABASE_URL` in `.env` on **`127.0.0.1`** for host-side tools or local uvicorn against the published DB port.
+Postgres: service **`db`**, database **`calovia`**, user **`postgres`**. The **`app`** container always gets `DATABASE_URL` pointed at host **`db`** via Compose overrides; keep `DATABASE_URL` in `.env` on **`127.0.0.1`** for host-side tools or local uvicorn against the published DB port.
 
 ## Schema
 

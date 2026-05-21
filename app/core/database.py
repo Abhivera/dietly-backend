@@ -25,7 +25,7 @@ def _create_engine():
         echo=False,
         connect_args={
             "connect_timeout": 10,
-            "application_name": "dietly_backend",
+            "application_name": "calovia_backend",
         },
     )
 

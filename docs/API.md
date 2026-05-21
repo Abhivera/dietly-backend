@@ -1,4 +1,4 @@
-# Dietly API — Frontend Reference
+# Calovia API — Frontend Reference
 
 Base URL (local): `http://localhost:8000`  
 API prefix: `/api/v1`  
@@ -908,7 +908,7 @@ Cannot delete your own account (`400`).
 
 | Method | Path | Response |
 |--------|------|----------|
-| GET | `/` | `{ "message": "Dietly API is running", "docs": "/docs" }` |
+| GET | `/` | `{ "message": "Calovia API is running", "docs": "/docs" }` |
 | GET | `/health` | `{ "status": "healthy" }` |
 | GET | `/health/db` | `{ "status": "healthy", "database": "connected" }` or `503` |
 

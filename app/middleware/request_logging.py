@@ -11,7 +11,7 @@ from starlette.responses import Response
 
 from app.core.client_ip import get_client_ip
 
-logger = logging.getLogger("dietly.request")
+logger = logging.getLogger("calovia.request")
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):

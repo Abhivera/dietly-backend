@@ -31,7 +31,7 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(
-    title="Dietly API",
+    title="Calovia API",
     description="Food image analysis, meal tracking, and activity calories — JWT-authenticated API.",
     version="2.0.0",
     lifespan=lifespan,
@@ -60,7 +60,7 @@ app.include_router(api_router, prefix="/api/v1")
 
 @app.get("/")
 def read_root():
-    return {"message": "Dietly API is running", "docs": "/docs"}
+    return {"message": "Calovia API is running", "docs": "/docs"}
 
 
 @app.get("/health")

@@ -4,20 +4,20 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: dietly
+      POSTGRES_DB: calovia
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "${POSTGRES_PUBLISH_PORT:-5432}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d dietly"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d calovia"]
       interval: 5s
       timeout: 5s
       retries: 10
       start_period: 10s
     restart: unless-stopped
     networks:
-      - dietly
+      - calovia
 
   app:
     build:
@@ -32,7 +32,7 @@ services:
       - .env
     environment:
       # Overrides host-oriented DATABASE_URL from .env when the API runs in this network.
-      DATABASE_URL: postgresql+psycopg2://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/dietly
+      DATABASE_URL: postgresql+psycopg2://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/calovia
     ports:
       - "${APP_PUBLISH_PORT:-8000}:8000"
     healthcheck:
@@ -49,10 +49,10 @@ services:
       start_period: 50s
     restart: unless-stopped
     networks:
-      - dietly
+      - calovia
 
 networks:
-  dietly:
+  calovia:
     driver: bridge
 
 volumes:

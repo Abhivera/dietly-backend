@@ -25,7 +25,7 @@ class GeminiProvider(VisionLLMProvider):
         )
 
     def _post(self, payload: dict[str, Any]) -> requests.Response:
-        headers = {"Content-Type": "application/json", "User-Agent": "Dietly/1.0"}
+        headers = {"Content-Type": "application/json", "User-Agent": "Calovia/1.0"}
         url = f"{self._url}?key={self._api_key}"
         return requests.post(url, headers=headers, json=payload, timeout=120)
 

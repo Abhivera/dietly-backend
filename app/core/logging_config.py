@@ -7,7 +7,7 @@ import sys
 
 
 def configure_logging() -> None:
-    """Root formatter; request lines use the dietly.request logger."""
+    """Root formatter; request lines use the calovia.request logger."""
     root = logging.getLogger()
     if root.handlers:
         return

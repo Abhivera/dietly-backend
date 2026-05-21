@@ -14,13 +14,13 @@ COPY requirements.txt ./
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-RUN useradd --create-home --system --uid 1000 --shell /usr/sbin/nologin dietly && \
+RUN useradd --create-home --system --uid 1000 --shell /usr/sbin/nologin calovia && \
     mkdir -p /app/uploads && \
-    chown -R dietly:dietly /app
+    chown -R calovia:calovia /app
 
-COPY --chown=dietly:dietly . .
+COPY --chown=calovia:calovia . .
 
-USER dietly
+USER calovia
 
 EXPOSE 8000
 
