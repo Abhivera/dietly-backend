@@ -19,7 +19,7 @@ class StepGoalUpdate(BaseModel):
 
 
 class UserResponse(BaseModel):
-    id: int
+    id: str
     email: EmailStr
     full_name: Optional[str] = None
     avatar_url: Optional[str] = None

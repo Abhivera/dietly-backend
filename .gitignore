@@ -10,6 +10,7 @@ env.bak/
 venv.bak/
 .env
 .env.local
+firebase-service-account.json
 .venv
 uploads/
 *.db

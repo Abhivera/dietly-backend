@@ -18,7 +18,7 @@ class AdminUserListResponse(BaseModel):
 
 
 class AdminUserImagesListResponse(BaseModel):
-    user_id: int
+    user_id: str
     total: int = Field(..., ge=0)
     images: list[dict[str, Any]]
 

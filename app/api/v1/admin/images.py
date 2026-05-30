@@ -1,9 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_admin
 from app.controllers import admin_images as admin_images_ctrl
-from app.core.database import get_db
+from app.core.database import Database, get_db
 from app.models.user import User
 
 router = APIRouter()
@@ -11,8 +10,8 @@ router = APIRouter()
 
 @router.get("/{image_id}", summary="Get one image with analysis (any owner)")
 def admin_get_image(
-    image_id: int,
-    db: Session = Depends(get_db),
+    image_id: str,
+    db: Database = Depends(get_db),
     _admin: User = Depends(get_current_admin),
 ):
     detail = admin_images_ctrl.get_image_detail_for_admin(db, image_id)
@@ -23,8 +22,8 @@ def admin_get_image(
 
 @router.delete("/{image_id}", summary="Delete an image (file on disk + DB, any owner)")
 def admin_delete_image(
-    image_id: int,
-    db: Session = Depends(get_db),
+    image_id: str,
+    db: Database = Depends(get_db),
     _admin: User = Depends(get_current_admin),
 ):
     ok, err = admin_images_ctrl.delete_image_by_id(db, image_id)

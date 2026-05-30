@@ -125,8 +125,8 @@ class UserCaloriesUpdate(BaseModel):
 
 
 class UserCaloriesResponse(BaseModel):
-    id: int
-    user_id: int
+    id: str
+    user_id: str
     activity_date: date
     calories_burned: List[Dict[str, Any]]
     total_burned: int = 0

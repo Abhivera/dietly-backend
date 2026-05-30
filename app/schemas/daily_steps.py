@@ -28,8 +28,8 @@ class DailyStepsSyncRequest(BaseModel):
 
 
 class DailyStepsResponse(BaseModel):
-    id: int
-    user_id: int
+    id: str
+    user_id: str
     step_date: date
     step_count: int
     distance_km: float | None

@@ -4,4 +4,10 @@ from app.models.streaks import UserStreak
 from app.models.user import User
 from app.models.user_calories import UserCalories
 
-__all__ = ("User", "Image", "UserCalories", "DailySteps", "UserStreak")
+__all__ = [
+    "User",
+    "Image",
+    "UserCalories",
+    "DailySteps",
+    "UserStreak",
+]

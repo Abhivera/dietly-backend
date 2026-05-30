@@ -1,7 +1,6 @@
 fastapi>=0.115.6,<0.116
 uvicorn[standard]>=0.34.0
 gunicorn>=23.0.0
-sqlalchemy>=2.0.36,<2.1
 pydantic>=2.10.0,<3
 pydantic-settings>=2.6.0
 python-multipart>=0.0.20
@@ -12,7 +11,5 @@ botocore>=1.35.0
 requests>=2.32.3
 pillow>=11.0.0
 python-dateutil>=2.9.0
-psycopg2-binary>=2.9.10
-PyJWT>=2.8.0
-bcrypt>=4.2.0
+firebase-admin>=6.6.0
 httpx>=0.28.0

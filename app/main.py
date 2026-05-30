@@ -9,12 +9,11 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.v1 import api_router
 from app.core.config import settings
-from app.core.database import Base, SessionLocal, engine, text
+from app.core.database import get_database
 from app.core.exception_handlers import register_exception_handlers
-from app.core.schema_patch import apply_postgres_users_jwt_schema
 from app.core.logging_config import configure_logging
+from app.db.tables import ensure_tables
 from app.middleware.request_logging import RequestLoggingMiddleware
-from app.models import daily_steps, image, streaks, user, user_calories  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -24,15 +23,14 @@ configure_logging()
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     if settings.schema_auto_create:
-        Base.metadata.create_all(bind=engine)
-        logger.info("schema_auto_create: ensured tables exist (SQLAlchemy create_all)")
-    apply_postgres_users_jwt_schema(engine)
+        ensure_tables()
+        logger.info("schema_auto_create: ensured DynamoDB tables exist")
     yield
 
 
 app = FastAPI(
     title="Calovia API",
-    description="Food image analysis, meal tracking, and activity calories — JWT-authenticated API.",
+    description="Food image analysis, meal tracking, and activity calories — Firebase-authenticated API.",
     version="2.0.0",
     lifespan=lifespan,
 )
@@ -71,11 +69,10 @@ def health_check():
 @app.get("/health/db")
 def database_health_check():
     try:
-        db = SessionLocal()
-        try:
-            db.execute(text("SELECT 1"))
-        finally:
-            db.close()
+        db = get_database()
+        db.users._table.meta.client.describe_table(
+            TableName=db.users._table.name,
+        )
         return {"status": "healthy", "database": "connected"}
     except Exception:
         logger.exception("DB health check failed")
@@ -84,7 +81,7 @@ def database_health_check():
             content={
                 "status": "unhealthy",
                 "database": "disconnected",
-                "detail": "Database is not reachable.",
-                "message": "Database is not reachable.",
+                "detail": "DynamoDB is not reachable.",
+                "message": "DynamoDB is not reachable.",
             },
         )

@@ -1,48 +1,39 @@
-from sqlalchemy.orm import Session
-
+from app.core.database import Database
 from app.core.roles import UserRole
 from app.models.user import User
 
 
 def list_users(
-    db: Session,
+    db: Database,
     *,
     skip: int = 0,
     limit: int = 100,
     email_contains: str | None = None,
 ) -> tuple[list[User], int]:
-    base = db.query(User)
-    if email_contains:
-        base = base.filter(User.email.ilike(f"%{email_contains}%"))
-    total = base.count()
-    rows = base.order_by(User.id).offset(skip).limit(limit).all()
-    return rows, total
+    return db.users.list_all(skip=skip, limit=limit, email_contains=email_contains)
 
 
-def get_user_by_id(db: Session, user_id: int) -> User | None:
-    return db.query(User).filter(User.id == user_id).first()
+def get_user_by_id(db: Database, user_id: str) -> User | None:
+    return db.users.get_by_id(user_id)
 
 
-def delete_user(db: Session, user_id: int) -> bool:
+def delete_user(db: Database, user_id: str) -> bool:
     user = get_user_by_id(db, user_id)
     if user is None:
         return False
-    db.delete(user)
-    db.commit()
+    db.delete_user_cascade(user_id)
     return True
 
 
-def set_user_role(db: Session, user_id: int, role: UserRole) -> User | None:
+def set_user_role(db: Database, user_id: str, role: UserRole) -> User | None:
     user = get_user_by_id(db, user_id)
     if user is None:
         return None
     user.role = role.value
-    db.commit()
-    db.refresh(user)
-    return user
+    return db.users.save(user)
 
 
-def patch_user_profile(db: Session, user_id: int, fields: dict) -> User | None:
+def patch_user_profile(db: Database, user_id: str, fields: dict) -> User | None:
     user = get_user_by_id(db, user_id)
     if user is None:
         return None
@@ -56,9 +47,5 @@ def patch_user_profile(db: Session, user_id: int, fields: dict) -> User | None:
         "goal_weight",
         "step_goal",
     }
-    for key, value in fields.items():
-        if key in allowed:
-            setattr(user, key, value)
-    db.commit()
-    db.refresh(user)
-    return user
+    filtered = {k: v for k, v in fields.items() if k in allowed}
+    return db.users.update_fields(user, filtered)

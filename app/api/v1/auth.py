@@ -1,67 +1,98 @@
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 
+from app.api.deps import get_firebase_claims
 from app.core.config import settings
-from app.core.database import get_db
+from app.core.database import Database, get_db
 from app.core.roles import UserRole
-from app.core.security import create_access_token, hash_password, verify_password
 from app.models.user import User
-from app.schemas.auth import LoginBody, RegisterBody, TokenResponse
+from app.schemas.auth import SessionBody
+from app.schemas.user import UserResponse
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-@router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-def register(body: RegisterBody, db: Session = Depends(get_db)):
-    email = body.email.lower().strip()
-    existing = db.query(User).filter(User.email == email).first()
-    if existing:
+def _email_from_claims(claims: dict[str, object]) -> str:
+    email = claims.get("email")
+    if not isinstance(email, str) or not email.strip():
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Email already registered",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Firebase account must have a verified email",
         )
+    return email.lower().strip()
 
-    display_name = (body.full_name or "").strip() or body.email.split("@")[0]
-    user = User(
+
+def _uid_from_claims(claims: dict[str, object]) -> str:
+    uid = claims.get("uid") or claims.get("sub")
+    if not isinstance(uid, str) or not uid:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload",
+        )
+    return uid
+
+
+def _name_from_claims(claims: dict[str, object]) -> str | None:
+    name = claims.get("name")
+    if isinstance(name, str) and name.strip():
+        return name.strip()
+    return None
+
+
+@router.post("/session", response_model=UserResponse, status_code=status.HTTP_200_OK)
+def sync_session(
+    body: SessionBody = Body(default_factory=SessionBody),
+    claims: dict[str, object] = Depends(get_firebase_claims),
+    db: Database = Depends(get_db),
+):
+    """Create or link a Calovia user for the signed-in Firebase account."""
+    firebase_uid = _uid_from_claims(claims)
+    email = _email_from_claims(claims)
+
+    user = db.users.get_by_firebase_uid_or_email(firebase_uid, email)
+
+    if user is not None:
+        changed = False
+        if user.firebase_uid is None:
+            user.firebase_uid = firebase_uid
+            changed = True
+        if user.email != email:
+            user.email = email
+            changed = True
+        if body.full_name and body.full_name.strip():
+            user.full_name = body.full_name.strip()
+            changed = True
+        elif not user.full_name:
+            claim_name = _name_from_claims(claims)
+            if claim_name:
+                user.full_name = claim_name
+                changed = True
+        if changed:
+            db.users.save(user)
+        return user
+
+    display_name = (
+        (body.full_name.strip() if body.full_name else None)
+        or _name_from_claims(claims)
+        or email.split("@")[0]
+    )
+    user = User.new(
         email=email,
-        password_hash=hash_password(body.password),
+        firebase_uid=firebase_uid,
+        password_hash=None,
         full_name=display_name,
         avatar_url=settings.default_avatar_url,
         role=UserRole.user.value,
     )
-    db.add(user)
     try:
-        db.commit()
-        db.refresh(user)
+        db.users.create(user)
     except Exception:
-        db.rollback()
-        logger.exception("register_failed email=%s", email)
+        logger.exception("firebase_session_failed email=%s uid=%s", email, firebase_uid)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Could not create account",
-        )
+        ) from None
 
-    token = create_access_token(user_id=user.id, email=user.email)
-    return TokenResponse(access_token=token)
-
-
-@router.post("/login", response_model=TokenResponse)
-def login(body: LoginBody, db: Session = Depends(get_db)):
-    email = body.email.lower().strip()
-    user = db.query(User).filter(User.email == email).first()
-    if user is None or not user.password_hash:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password",
-        )
-    if not verify_password(body.password, user.password_hash):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password",
-        )
-
-    token = create_access_token(user_id=user.id, email=user.email)
-    return TokenResponse(access_token=token)
+    return user

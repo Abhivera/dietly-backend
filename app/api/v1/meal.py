@@ -9,10 +9,7 @@ from typing import Any, Dict, Optional
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-
-from app.api.deps import get_current_user
-from app.core.database import get_db
+from app.core.database import Database, get_db
 from app.models.user import User
 from app.services.image_service import ImageService
 
@@ -30,7 +27,7 @@ async def get_meal_summary(
     date: Optional[str] = None,
     week: Optional[str] = None,
     month: Optional[str] = None,
-    db: Session = Depends(get_db),
+    db: Database = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """Only `analysis.is_meal` images are included in totals and `meals` list."""

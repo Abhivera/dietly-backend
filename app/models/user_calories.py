@@ -1,8 +1,10 @@
-from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, JSON, UniqueConstraint
-from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
+from __future__ import annotations
 
-from app.core.database import Base
+from dataclasses import dataclass, field
+from datetime import date, datetime
+from typing import Any
+
+from app.db.serialize import date_from_str, date_to_str, from_dynamo, from_iso, to_dynamo, to_iso, utc_now
 
 
 def total_burned_from_json(calories_burned: list | None) -> int:
@@ -17,22 +19,42 @@ def total_burned_from_json(calories_burned: list | None) -> int:
     return total
 
 
-class UserCalories(Base):
-    __tablename__ = "user_calories"
-    __table_args__ = (
-        UniqueConstraint("user_id", "activity_date", name="uq_user_calories_user_activity_date"),
-    )
+@dataclass
+class UserCalories:
+    user_id: str
+    activity_date: date
+    calories_burned: list
+    total_burned: int = 0
+    created_at: datetime = field(default_factory=utc_now)
+    updated_at: datetime | None = None
+    id: str = field(default="")
 
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    activity_date = Column(Date, nullable=False, index=True)
-    calories_burned = Column(JSON, nullable=False)
-    total_burned = Column(Integer, nullable=False, server_default="0")
+    def __post_init__(self) -> None:
+        if not self.id:
+            self.id = f"{self.user_id}#{self.activity_date.isoformat()}"
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    def to_item(self) -> dict[str, Any]:
+        item = {
+            "id": self.id,
+            "user_id": self.user_id,
+            "activity_date": date_to_str(self.activity_date),
+            "calories_burned": to_dynamo(self.calories_burned),
+            "total_burned": self.total_burned,
+            "created_at": to_iso(self.created_at),
+        }
+        if self.updated_at:
+            item["updated_at"] = to_iso(self.updated_at)
+        return item
 
-    user = relationship("User", back_populates="user_calories")
-
-    def __repr__(self) -> str:
-        return f"<UserCalories(id={self.id}, user_id={self.user_id}, activity_date='{self.activity_date}')>"
+    @classmethod
+    def from_item(cls, item: dict[str, Any]) -> UserCalories:
+        data = from_dynamo(item)
+        return cls(
+            user_id=data["user_id"],
+            activity_date=date_from_str(data["activity_date"]) or date.today(),
+            calories_burned=data.get("calories_burned") or [],
+            total_burned=int(data.get("total_burned", 0)),
+            created_at=from_iso(data.get("created_at")) or utc_now(),
+            updated_at=from_iso(data.get("updated_at")),
+            id=data.get("id") or f"{data['user_id']}#{data['activity_date']}",
+        )

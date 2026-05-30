@@ -1,40 +1,77 @@
-from sqlalchemy import Column, DateTime, Integer, String, text
-from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
+from __future__ import annotations
 
-from app.core.database import Base
+from dataclasses import dataclass, field
+from datetime import date, datetime
+from typing import Any
+from uuid import uuid4
+
+from app.db.serialize import date_from_str, date_to_str, from_dynamo, from_iso, to_dynamo, to_iso, utc_now
 
 
-class User(Base):
-    __tablename__ = "users"
+@dataclass
+class User:
+    id: str
+    email: str
+    firebase_uid: str | None = None
+    password_hash: str | None = None
+    full_name: str | None = None
+    avatar_url: str | None = None
+    role: str = "user"
+    created_at: datetime = field(default_factory=utc_now)
+    updated_at: datetime | None = None
+    gender: str | None = None
+    age: int | None = None
+    weight: int | None = None
+    height: int | None = None
+    goal_weight: int | None = None
+    step_goal: int = 8000
 
-    id = Column(Integer, primary_key=True, index=True)
-    email = Column(String, unique=True, index=True, nullable=False)
-    password_hash = Column(String(255), nullable=False)
-    full_name = Column(String, nullable=True)
-    avatar_url = Column(String, nullable=True)
+    @classmethod
+    def new(cls, **kwargs: Any) -> User:
+        return cls(id=str(uuid4()), **kwargs)
 
-    role = Column(String(20), nullable=False, server_default=text("'user'"), index=True)
+    def to_item(self) -> dict[str, Any]:
+        item = {
+            "id": self.id,
+            "email": self.email,
+            "role": self.role,
+            "step_goal": self.step_goal,
+            "created_at": to_iso(self.created_at),
+        }
+        optional = {
+            "firebase_uid": self.firebase_uid,
+            "password_hash": self.password_hash,
+            "full_name": self.full_name,
+            "avatar_url": self.avatar_url,
+            "updated_at": to_iso(self.updated_at),
+            "gender": self.gender,
+            "age": self.age,
+            "weight": self.weight,
+            "height": self.height,
+            "goal_weight": self.goal_weight,
+        }
+        for key, value in optional.items():
+            if value is not None:
+                item[key] = value
+        return to_dynamo(item)
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-
-    gender = Column(String, nullable=True)
-    age = Column(Integer, nullable=True)
-    weight = Column(Integer, nullable=True)
-    height = Column(Integer, nullable=True)
-    goal_weight = Column(Integer, nullable=True)
-    step_goal = Column(Integer, nullable=False, server_default=text("8000"))
-
-    images = relationship("Image", back_populates="owner", cascade="all, delete-orphan")
-    user_calories = relationship("UserCalories", back_populates="user", cascade="all, delete-orphan")
-    daily_steps = relationship("DailySteps", back_populates="user", cascade="all, delete-orphan")
-    streak_row = relationship(
-        "UserStreak",
-        back_populates="user",
-        uselist=False,
-        cascade="all, delete-orphan",
-    )
-
-    def __repr__(self) -> str:
-        return f"<User(id={self.id}, email='{self.email}')>"
+    @classmethod
+    def from_item(cls, item: dict[str, Any]) -> User:
+        data = from_dynamo(item)
+        return cls(
+            id=data["id"],
+            email=data["email"],
+            firebase_uid=data.get("firebase_uid"),
+            password_hash=data.get("password_hash"),
+            full_name=data.get("full_name"),
+            avatar_url=data.get("avatar_url"),
+            role=data.get("role", "user"),
+            created_at=from_iso(data["created_at"]) or utc_now(),
+            updated_at=from_iso(data.get("updated_at")),
+            gender=data.get("gender"),
+            age=data.get("age"),
+            weight=data.get("weight"),
+            height=data.get("height"),
+            goal_weight=data.get("goal_weight"),
+            step_goal=int(data.get("step_goal", 8000)),
+        )

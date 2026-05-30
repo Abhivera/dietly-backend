@@ -1,17 +1,12 @@
-"""Authenticated **activity calories** (manual workout / burn logs by calendar day).
-
-**Mobile+Web:** `POST /log-activity` is the quick structured log (walking, running, …) from native
-shortcuts; `POST /` with full JSON list suits web forms or imports. Summaries feed dashboards.
-"""
+"""Authenticated **activity calories** (manual workout / burn logs by calendar day)."""
 
 from datetime import date, datetime, timedelta, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
-from app.core.database import get_db
+from app.core.database import Database, get_db
 from app.models.user import User
 from app.models.user_calories import UserCalories, total_burned_from_json
 from app.schemas.user_calories import (
@@ -41,25 +36,13 @@ def _activities_summary(calories_entries: List[UserCalories]) -> dict:
     return summary
 
 
-@router.post(
-    "/",
-    response_model=UserCaloriesResponse,
-    summary="[Web+Mobile] Create full-day burn log (explicit activity list)",
-    description="One row per `activity_date`; fails if a row already exists for that day.",
-)
+@router.post("/", response_model=UserCaloriesResponse, summary="[Web+Mobile] Create full-day burn log")
 def create_user_calories(
     calories_data: UserCaloriesCreate,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: Database = Depends(get_db),
 ):
-    existing = (
-        db.query(UserCalories)
-        .filter(
-            UserCalories.user_id == current_user.id,
-            UserCalories.activity_date == calories_data.activity_date,
-        )
-        .first()
-    )
+    existing = db.user_calories.get(current_user.id, calories_data.activity_date)
     if existing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -72,22 +55,14 @@ def create_user_calories(
         calories_burned=activities_json,
         total_burned=total_burned_from_json(activities_json),
     )
-    db.add(row)
-    db.commit()
-    db.refresh(row)
-    return row
+    return db.user_calories.create(row)
 
 
-@router.post(
-    "/log-activity",
-    response_model=UserCaloriesResponse,
-    summary="[Mobile-first] Append one MET-based activity to a day",
-    description="Creates the day row if needed; duplicates activity names get a numeric suffix.",
-)
+@router.post("/log-activity", response_model=UserCaloriesResponse, summary="[Mobile-first] Append one activity")
 def log_structured_activity(
     body: ActivityLogRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: Database = Depends(get_db),
 ):
     activity_date = body.activity_date or datetime.now(timezone.utc).date()
     weight_kg = float(current_user.weight) if current_user.weight and current_user.weight > 0 else None
@@ -103,17 +78,8 @@ def log_structured_activity(
     base_label = activity_display_label(body.activity_type)
     base_name = f"{base_label} · {body.duration_minutes} min"
 
-    row = (
-        db.query(UserCalories)
-        .filter(
-            UserCalories.user_id == current_user.id,
-            UserCalories.activity_date == activity_date,
-        )
-        .first()
-    )
-    activities: list = []
-    if row and row.calories_burned:
-        activities = list(row.calories_burned)
+    row = db.user_calories.get(current_user.id, activity_date)
+    activities: list = list(row.calories_burned) if row and row.calories_burned else []
 
     existing_names = {str(a.get("activity_name", "")) for a in activities}
     name = base_name
@@ -122,12 +88,7 @@ def log_structured_activity(
         name = f"{base_name} ({suffix})"
         suffix += 1
 
-    current_total = 0
-    for a in activities:
-        try:
-            current_total += int(a.get("calories", 0))
-        except (ValueError, TypeError):
-            continue
+    current_total = sum(int(a.get("calories", 0)) for a in activities if str(a.get("calories", "")).isdigit())
     if current_total + cals > 5000:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -135,15 +96,12 @@ def log_structured_activity(
         )
 
     activities.append({"activity_name": name, "calories": str(cals)})
-
     total = total_burned_from_json(activities)
 
     if row:
         row.calories_burned = activities
         row.total_burned = total
-        db.commit()
-        db.refresh(row)
-        return row
+        return db.user_calories.save(row)
 
     new_row = UserCalories(
         user_id=current_user.id,
@@ -151,41 +109,26 @@ def log_structured_activity(
         calories_burned=activities,
         total_burned=total,
     )
-    db.add(new_row)
-    db.commit()
-    db.refresh(new_row)
-    return new_row
+    return db.user_calories.create(new_row)
 
 
-@router.get(
-    "/summary/range",
-    response_model=UserCaloriesSummary,
-    summary="[Mobile+Web] Burn totals over a custom date range",
-)
+@router.get("/summary/range", response_model=UserCaloriesSummary)
 def get_user_calories_summary(
     start_date: date = Query(..., description="Start date for summary"),
     end_date: date = Query(..., description="End date for summary"),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: Database = Depends(get_db),
 ):
     if start_date > end_date:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Start date must be before or equal to end date",
         )
-    entries = (
-        db.query(UserCalories)
-        .filter(
-            UserCalories.user_id == current_user.id,
-            UserCalories.activity_date >= start_date,
-            UserCalories.activity_date <= end_date,
-        )
-        .all()
+    entries = db.user_calories.list_for_user(
+        current_user.id, start_date=start_date, end_date=end_date, limit=10_000
     )
     count = len(entries)
-    total = 0
-    for e in entries:
-        total += e.total_burned
+    total = sum(e.total_burned for e in entries)
     avg = total / count if count else 0.0
     return UserCaloriesSummary(
         total_calories_burned=total,
@@ -197,31 +140,19 @@ def get_user_calories_summary(
     )
 
 
-@router.get(
-    "/summary/recent",
-    response_model=UserCaloriesSummary,
-    summary="[Mobile+Web] Burn totals for the last N days",
-)
+@router.get("/summary/recent", response_model=UserCaloriesSummary)
 def get_recent_calories_summary(
-    days: int = Query(7, ge=1, le=365, description="Number of recent days to summarize"),
+    days: int = Query(7, ge=1, le=365),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: Database = Depends(get_db),
 ):
     end_date = date.today()
     start_date = end_date - timedelta(days=days - 1)
-    entries = (
-        db.query(UserCalories)
-        .filter(
-            UserCalories.user_id == current_user.id,
-            UserCalories.activity_date >= start_date,
-            UserCalories.activity_date <= end_date,
-        )
-        .all()
+    entries = db.user_calories.list_for_user(
+        current_user.id, start_date=start_date, end_date=end_date, limit=10_000
     )
     count = len(entries)
-    total = 0
-    for e in entries:
-        total += e.total_burned
+    total = sum(e.total_burned for e in entries)
     avg = total / count if count else 0.0
     return UserCaloriesSummary(
         total_calories_burned=total,
@@ -233,45 +164,31 @@ def get_recent_calories_summary(
     )
 
 
-@router.get(
-    "/",
-    response_model=List[UserCaloriesResponse],
-    summary="[Mobile+Web] List burn log rows (paginated, optional date bounds)",
-)
+@router.get("/", response_model=List[UserCaloriesResponse])
 def get_user_calories(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     start_date: Optional[date] = Query(None),
     end_date: Optional[date] = Query(None),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: Database = Depends(get_db),
 ):
-    q = db.query(UserCalories).filter(UserCalories.user_id == current_user.id)
-    if start_date:
-        q = q.filter(UserCalories.activity_date >= start_date)
-    if end_date:
-        q = q.filter(UserCalories.activity_date <= end_date)
-    return q.order_by(UserCalories.activity_date.desc()).offset(skip).limit(limit).all()
+    return db.user_calories.list_for_user(
+        current_user.id,
+        start_date=start_date,
+        end_date=end_date,
+        skip=skip,
+        limit=limit,
+    )
 
 
-@router.get(
-    "/date/{activity_date}",
-    response_model=UserCaloriesResponse,
-    summary="[Mobile+Web] Get one day’s burn log by calendar date",
-)
+@router.get("/date/{activity_date}", response_model=UserCaloriesResponse)
 def get_user_calories_by_date(
     activity_date: date,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: Database = Depends(get_db),
 ):
-    row = (
-        db.query(UserCalories)
-        .filter(
-            UserCalories.user_id == current_user.id,
-            UserCalories.activity_date == activity_date,
-        )
-        .first()
-    )
+    row = db.user_calories.get(current_user.id, activity_date)
     if not row:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -280,64 +197,33 @@ def get_user_calories_by_date(
     return row
 
 
-@router.get(
-    "/{calories_id}",
-    response_model=UserCaloriesResponse,
-    summary="[Web+Mobile] Get burn log row by primary key",
-    description="Use when you have the row `id` from a list response.",
-)
+@router.get("/{calories_id}", response_model=UserCaloriesResponse)
 def get_user_calories_by_id(
-    calories_id: int,
+    calories_id: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: Database = Depends(get_db),
 ):
-    row = (
-        db.query(UserCalories)
-        .filter(
-            UserCalories.id == calories_id,
-            UserCalories.user_id == current_user.id,
-        )
-        .first()
-    )
+    row = db.user_calories.get_by_id(calories_id, current_user.id)
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Calorie entry not found")
     return row
 
 
-@router.put(
-    "/{calories_id}",
-    response_model=UserCaloriesResponse,
-    summary="[Web+Mobile] Replace or shift fields on a burn log row",
-)
+@router.put("/{calories_id}", response_model=UserCaloriesResponse)
 def update_user_calories(
-    calories_id: int,
+    calories_id: str,
     calories_update: UserCaloriesUpdate,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: Database = Depends(get_db),
 ):
-    calories = (
-        db.query(UserCalories)
-        .filter(
-            UserCalories.id == calories_id,
-            UserCalories.user_id == current_user.id,
-        )
-        .first()
-    )
+    calories = db.user_calories.get_by_id(calories_id, current_user.id)
     if not calories:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Calorie entry not found")
 
     update_data = calories_update.model_dump(exclude_unset=True)
     if "activity_date" in update_data:
-        conflict = (
-            db.query(UserCalories)
-            .filter(
-                UserCalories.user_id == current_user.id,
-                UserCalories.activity_date == update_data["activity_date"],
-                UserCalories.id != calories_id,
-            )
-            .first()
-        )
-        if conflict:
+        conflict = db.user_calories.get(current_user.id, update_data["activity_date"])
+        if conflict and conflict.id != calories.id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Calorie entry already exists for date {update_data['activity_date']}",
@@ -355,41 +241,31 @@ def update_user_calories(
                     detail="Invalid activity format in calories_burned",
                 )
         update_data["calories_burned"] = new_activities
-    try:
-        for field, value in update_data.items():
-            setattr(calories, field, value)
-        if "calories_burned" in update_data:
-            calories.total_burned = total_burned_from_json(calories.calories_burned)
-        db.commit()
-        db.refresh(calories)
-        return calories
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update calorie entry: {e}",
-        ) from e
+
+    old_date = calories.activity_date
+    new_date = update_data.get("activity_date", old_date)
+
+    for field, value in update_data.items():
+        setattr(calories, field, value)
+    if "calories_burned" in update_data:
+        calories.total_burned = total_burned_from_json(calories.calories_burned)
+
+    if new_date != old_date:
+        db.user_calories.delete(UserCalories(user_id=calories.user_id, activity_date=old_date, calories_burned=[]))
+        calories.activity_date = new_date
+        calories.id = f"{calories.user_id}#{new_date.isoformat()}"
+
+    return db.user_calories.save(calories)
 
 
-@router.delete(
-    "/{calories_id}",
-    summary="[Web+Mobile] Delete a burn log row",
-)
+@router.delete("/{calories_id}")
 def delete_user_calories(
-    calories_id: int,
+    calories_id: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: Database = Depends(get_db),
 ):
-    row = (
-        db.query(UserCalories)
-        .filter(
-            UserCalories.id == calories_id,
-            UserCalories.user_id == current_user.id,
-        )
-        .first()
-    )
+    row = db.user_calories.get_by_id(calories_id, current_user.id)
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Calorie entry not found")
-    db.delete(row)
-    db.commit()
+    db.user_calories.delete(row)
     return {"success": True, "message": "Calorie entry deleted successfully"}

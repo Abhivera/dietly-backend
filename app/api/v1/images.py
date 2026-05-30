@@ -12,12 +12,9 @@ from io import BytesIO
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from PIL import Image as PILImage
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
-
 from app.api.deps import get_current_user
 from app.core.client_ip import get_client_ip
-from app.core.database import get_db
-from app.models.image import Image
+from app.core.database import Database, get_db
 from app.models.user import User
 from app.services.image_service import ImageService
 from app.services.llm_service import LLMService
@@ -39,7 +36,7 @@ async def upload_and_analyze_image(
     request: Request,
     file: UploadFile = File(...),
     description: str | None = Form(None),
-    db: Session = Depends(get_db),
+    db: Database = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     ip = getattr(request.state, "client_ip", None) or get_client_ip(request)
@@ -92,7 +89,7 @@ async def get_user_images(
     date: str | None = None,
     week: str | None = None,
     month: str | None = None,
-    db: Session = Depends(get_db),
+    db: Database = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     filter_type = None
@@ -119,8 +116,8 @@ async def get_user_images(
     description="Reads stored `meal_name` from last analysis — no extra model call.",
 )
 async def get_suggested_meal_name(
-    image_id: int,
-    db: Session = Depends(get_db),
+    image_id: str,
+    db: Database = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     image_service = ImageService(db)
@@ -136,8 +133,8 @@ async def get_suggested_meal_name(
     description="Quick re-log of a previous meal without re-uploading the file.",
 )
 async def relog_image(
-    image_id: int,
-    db: Session = Depends(get_db),
+    image_id: str,
+    db: Database = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     image_service = ImageService(db)
@@ -153,8 +150,8 @@ async def relog_image(
     summary="[Mobile+Web] Single image with analysis payload",
 )
 async def get_image_with_analysis(
-    image_id: int,
-    db: Session = Depends(get_db),
+    image_id: str,
+    db: Database = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     image_service = ImageService(db)
@@ -170,9 +167,9 @@ async def get_image_with_analysis(
     description="Returns presigned URL when bucket objects are not public; use before displaying old rows.",
 )
 async def get_image_with_fresh_url(
-    image_id: int,
+    image_id: str,
     expiration: int = 3600,
-    db: Session = Depends(get_db),
+    db: Database = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     image_service = ImageService(db)
@@ -187,8 +184,8 @@ async def get_image_with_fresh_url(
     summary="[Mobile+Web] Delete my image",
 )
 async def delete_image(
-    image_id: int,
-    db: Session = Depends(get_db),
+    image_id: str,
+    db: Database = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     image_service = ImageService(db)
@@ -204,8 +201,8 @@ async def delete_image(
     description="Diagnostics for local use; omit from shipped mobile/web clients.",
 )
 async def test_image_processing(
-    image_id: int,
-    db: Session = Depends(get_db),
+    image_id: str,
+    db: Database = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     image_service = ImageService(db)
@@ -232,24 +229,16 @@ async def test_llm_service(current_user: User = Depends(get_current_user)):
     description="Only allowed when `is_food` is true; adjusts streak and meal summaries.",
 )
 async def update_is_meal(
-    image_id: int,
+    image_id: str,
     req: IsMealUpdateRequest,
-    db: Session = Depends(get_db),
+    db: Database = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    image = (
-        db.query(Image)
-        .filter(
-            Image.id == image_id,
-            Image.owner_id == current_user.id,
-        )
-        .first()
-    )
+    image = db.images.get_by_id_and_owner(image_id, current_user.id)
     if not image:
         raise HTTPException(status_code=404, detail="Image not found")
     if not image.is_food:
         raise HTTPException(status_code=400, detail="Cannot set is_meal: image is not food")
     image.is_meal = req.is_meal
-    db.commit()
-    db.refresh(image)
+    db.images.save(image)
     return {"success": True, "image_id": image.id, "is_meal": image.is_meal}

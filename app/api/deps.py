@@ -1,15 +1,14 @@
 import logging
 from typing import Annotated
 
-import jwt
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy.orm import Session
+from firebase_admin import auth as firebase_auth
 
 from app.core.client_ip import get_client_ip
-from app.core.database import get_db
+from app.core.database import Database, get_db
+from app.core.firebase import verify_id_token
 from app.core.roles import is_admin
-from app.core.security import decode_access_token
 from app.models.user import User
 
 security = HTTPBearer(auto_error=True)
@@ -21,48 +20,74 @@ def _client_ip(request: Request) -> str:
     return getattr(request.state, "client_ip", None) or get_client_ip(request)
 
 
-def get_current_user(
+def get_firebase_claims(
     request: Request,
-    db: Annotated[Session, Depends(get_db)],
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
-) -> User:
-    """Resolve user from JWT (`Authorization: Bearer <token>`)."""
+) -> dict[str, object]:
+    """Verify Firebase ID token (`Authorization: Bearer <token>`)."""
     ip = _client_ip(request)
     token = credentials.credentials
 
     try:
-        payload = decode_access_token(token)
-    except jwt.ExpiredSignatureError as exc:
-        logger.warning("auth_failed ip=%s reason=jwt_expired", ip)
+        return verify_id_token(token)
+    except firebase_auth.ExpiredIdTokenError as exc:
+        logger.warning("auth_failed ip=%s reason=firebase_token_expired", ip)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token expired",
         ) from exc
-    except jwt.InvalidTokenError as exc:
-        logger.warning("auth_failed ip=%s reason=invalid_jwt", ip)
+    except firebase_auth.RevokedIdTokenError as exc:
+        logger.warning("auth_failed ip=%s reason=firebase_token_revoked", ip)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token revoked",
+        ) from exc
+    except firebase_auth.InvalidIdTokenError as exc:
+        logger.warning("auth_failed ip=%s reason=invalid_firebase_token", ip)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or malformed token",
         ) from exc
+    except Exception as exc:
+        logger.warning("auth_failed ip=%s reason=firebase_verify_error", ip)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not verify token",
+        ) from exc
 
-    sub = payload.get("sub")
-    if not isinstance(sub, str) or not sub.isdigit():
-        logger.warning("auth_failed ip=%s reason=jwt_missing_sub", ip)
+
+def get_current_user(
+    request: Request,
+    db: Annotated[Database, Depends(get_db)],
+    claims: Annotated[dict[str, object], Depends(get_firebase_claims)],
+) -> User:
+    ip = _client_ip(request)
+
+    uid = claims.get("uid") or claims.get("sub")
+    if not isinstance(uid, str) or not uid:
+        logger.warning("auth_failed ip=%s reason=firebase_missing_uid", ip)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token payload",
         )
 
-    user_id = int(sub)
-    user = db.query(User).filter(User.id == user_id).first()
-    if user is None:
-        logger.warning("auth_failed ip=%s reason=user_not_found user_id=%s", ip, user_id)
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
-        )
+    user = db.users.get_by_firebase_uid(uid)
+    if user is not None:
+        return user
 
-    return user
+    email = claims.get("email")
+    if isinstance(email, str) and email.strip():
+        user = db.users.get_by_email(email.lower().strip())
+        if user is not None:
+            user.firebase_uid = uid
+            db.users.save(user)
+            return user
+
+    logger.warning("auth_failed ip=%s reason=user_not_registered uid=%s", ip, uid)
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Account not found. Complete registration via POST /auth/session.",
+    )
 
 
 def get_current_admin(current_user: Annotated[User, Depends(get_current_user)]) -> User:

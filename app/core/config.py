@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Optional
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,28 +12,40 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    database_url: str
-
-    frontend_url: str = Field(default="http://localhost:3000")
-
-    jwt_secret_key: str = Field(
-        min_length=16,
-        description="HS256 signing secret for JWT access tokens",
+    dynamodb_table_prefix: str = Field(default="calovia")
+    dynamodb_endpoint_url: Optional[str] = Field(
+        default=None,
+        description="Override for DynamoDB Local (e.g. http://localhost:8001)",
     )
 
-    jwt_access_token_expire_minutes: int = Field(
-        default=60 * 24 * 7,
-        ge=5,
-        le=60 * 24 * 365,
-        description="Access token lifetime in minutes",
+    frontend_url: str = Field(default="http://localhost:5173")
+
+    firebase_project_id: str = Field(
+        description="Firebase project ID (must match the web client config)",
+    )
+    firebase_credentials_path: Optional[str] = Field(
+        default=None,
+        description="Path to Firebase service account JSON (preferred for local/dev)",
+    )
+    firebase_credentials_json: Optional[str] = Field(
+        default=None,
+        description="Inline service account JSON (useful in Docker/CI secrets)",
     )
 
-    @field_validator("jwt_secret_key", mode="before")
+    @field_validator("firebase_credentials_path", mode="before")
     @classmethod
-    def strip_jwt_secret(cls, v: object) -> object:
+    def strip_firebase_path(cls, v: object) -> object:
         if isinstance(v, str):
-            return v.strip()
+            return v.strip() or None
         return v
+
+    @model_validator(mode="after")
+    def firebase_credentials_configured(self) -> "Settings":
+        if not self.firebase_credentials_path and not self.firebase_credentials_json:
+            raise ValueError(
+                "Set FIREBASE_CREDENTIALS_PATH or FIREBASE_CREDENTIALS_JSON"
+            )
+        return self
 
     # Base URL for ``file_url`` / ``/media/...`` links (e.g. http://127.0.0.1:8000 or LAN IP for mobile).
     public_media_base_url: str = "http://127.0.0.1:8000"

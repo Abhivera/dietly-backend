@@ -1,48 +1,39 @@
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import declarative_base, sessionmaker
-from sqlalchemy.pool import QueuePool, StaticPool
+from __future__ import annotations
 
-from app.core.config import settings
-
-
-def _create_engine():
-    url = settings.database_url.strip()
-    if url.startswith("sqlite"):
-        return create_engine(
-            url,
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-            echo=False,
-        )
-    return create_engine(
-        url,
-        poolclass=QueuePool,
-        pool_size=10,
-        max_overflow=20,
-        pool_pre_ping=True,
-        pool_recycle=3600,
-        pool_timeout=30,
-        echo=False,
-        connect_args={
-            "connect_timeout": 10,
-            "application_name": "calovia_backend",
-        },
-    )
+from app.repositories.daily_steps import DailyStepsRepository
+from app.repositories.images import ImageRepository
+from app.repositories.streaks import StreakRepository
+from app.repositories.user_calories import UserCaloriesRepository
+from app.repositories.users import UserRepository
 
 
-engine = _create_engine()
+class Database:
+    """Facade over DynamoDB repositories (replaces SQLAlchemy Session)."""
 
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    def __init__(self) -> None:
+        self.users = UserRepository()
+        self.images = ImageRepository()
+        self.user_calories = UserCaloriesRepository()
+        self.daily_steps = DailyStepsRepository()
+        self.streaks = StreakRepository()
 
-Base = declarative_base()
+    def delete_user_cascade(self, user_id: str) -> None:
+        self.images.delete_all_for_user(user_id)
+        self.user_calories.delete_all_for_user(user_id)
+        self.daily_steps.delete_all_for_user(user_id)
+        self.streaks.delete(user_id)
+        self.users.delete(user_id)
+
+
+_db: Database | None = None
+
+
+def get_database() -> Database:
+    global _db
+    if _db is None:
+        _db = Database()
+    return _db
 
 
 def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    except Exception:
-        db.rollback()
-        raise
-    finally:
-        db.close()
+    yield get_database()
